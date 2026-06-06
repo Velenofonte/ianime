@@ -26,7 +26,7 @@ const initial: AnimeFilters = {
 
 export const useFilterStore = create<FilterStore>((set) => ({
   ...initial,
-  panelOpen: localStorage.getItem('ianime-filters-open') !== '0',
+  panelOpen: localStorage.getItem('ianime-filters-open') === '1',
   setSearch: (search) => set({ search }),
   setGenres: (genres) => set({ genres }),
   setStatus: (status) => set({ status }),
