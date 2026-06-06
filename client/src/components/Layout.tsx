@@ -44,7 +44,12 @@ export function Layout() {
           <div className="flex items-center gap-2 text-sm">
             {user ? (
               <>
-                <span className="hidden text-gray-400 sm:inline">{user.username}</span>
+                <Link
+                  to="/account"
+                  className="rounded-lg px-2 py-1.5 text-gray-400 transition hover:bg-surface-hover hover:text-white"
+                >
+                  {user.username}
+                </Link>
                 <button onClick={logout} className="rounded-lg bg-surface-hover px-3 py-1.5 hover:bg-white/10">
                   Esci
                 </button>

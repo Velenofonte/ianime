@@ -6,6 +6,7 @@ import { AuthProvider } from './context/AuthContext';
 import { LoginPage, RegisterPage } from './pages/AuthPages';
 import { CalendarPage } from './pages/CalendarPage';
 import { FavoritesPage } from './pages/FavoritesPage';
+import { AccountPage } from './pages/AccountPage';
 import { AnimeDetailPage } from './pages/AnimeDetailPage';
 import { HomePage } from './pages/HomePage';
 import { NewsPage } from './pages/NewsPage';
@@ -26,6 +27,14 @@ export default function App() {
               <Route path="news" element={<NewsPage />} />
               <Route path="login" element={<LoginPage />} />
               <Route path="register" element={<RegisterPage />} />
+              <Route
+                path="account"
+                element={
+                  <ProtectedRoute>
+                    <AccountPage />
+                  </ProtectedRoute>
+                }
+              />
               <Route
                 path="preferiti"
                 element={

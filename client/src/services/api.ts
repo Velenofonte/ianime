@@ -38,6 +38,11 @@ export const api = {
       body: JSON.stringify({ username, email, password }),
     }),
   me: () => request<{ id: string; username: string; email: string }>('/auth/me'),
+  changePassword: (currentPassword: string, newPassword: string) =>
+    request('/auth/change-password', {
+      method: 'POST',
+      body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+    }),
   getFavorites: () => request<{ anilist_ids: number[] }>('/favorites'),
   addFavorite: (anilistId: number) =>
     request(`/favorites/${anilistId}`, { method: 'POST' }),
