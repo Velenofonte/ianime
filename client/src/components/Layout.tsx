@@ -30,8 +30,9 @@ export function Layout() {
       <InstallPrompt />
       <header className="sticky top-0 z-40 h-14 border-b border-white/10 bg-surface/95 backdrop-blur">
         <div className="mx-auto flex h-full max-w-7xl items-center justify-between gap-4 px-4">
-          <Link to="/" className="text-lg font-bold text-accent-light">
-            iAnime
+          <Link to="/" className="flex shrink-0 items-center gap-2.5">
+            <img src="/icons/icon.png" alt="" className="h-12 w-12 shrink-0 rounded-lg object-contain shadow-md shadow-accent/20" />
+            <span className="text-lg font-bold tracking-tight text-accent-light">iAnime</span>
           </Link>
           <nav className="hidden items-center gap-1 md:flex">
             {NAV_ITEMS.map(({ to, end, label, Icon }) => (

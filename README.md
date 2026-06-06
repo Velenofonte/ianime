@@ -1,6 +1,8 @@
-# Anime Tracker
+# iAnime
 
-Applicazione web PWA per tenere traccia degli anime preferiti, consultare il calendario delle uscite e leggere le news.
+PWA web per tenere traccia degli anime preferiti, consultare il calendario delle uscite e leggere le news.
+
+**Produzione:** [https://ianime.gigalixirapp.com](https://ianime.gigalixirapp.com)
 
 ## Stack
 
@@ -11,11 +13,14 @@ Applicazione web PWA per tenere traccia degli anime preferiti, consultare il cal
 
 ## Funzionalità
 
-- Home con anime popolari, filtri (titolo, genere, stato, stagioni, piattaforma)
+- Home con anime popolari e filtri avanzati (titolo, genere, stato, stagioni, score, piattaforma)
+- Pannello filtri nascosto di default, espandibile con un tap
 - Preferiti sincronizzati su account
 - Calendario settimanale uscite (preferiti in corso)
+- Dettaglio anime con descrizione completa
 - News aggregate da varie fonti
-- PWA installabile
+- Account con cambio password
+- PWA installabile con icona personalizzata (poster + «i» con calendario stilizzato)
 
 ## Prerequisiti
 
@@ -52,22 +57,40 @@ Apri http://localhost:5173 — il proxy inoltra `/api` a `:8000`.
 
 Utente seed: **davide** (password impostata in `DEFAULT_SEED_PASSWORD` nel file `.env`).
 
+La registrazione pubblica è disabilitata; per cambiare password usa la pagina **Account** dopo il login.
+
 ## Deploy su Gigalixir
+
+L'app in produzione si chiama **ianime** (`ianime.gigalixirapp.com`).
 
 ```bash
 pip install gigalixir
 gigalixir login
-gigalixir create -n anime-tracker
-gigalixir pg:create --free
-gigalixir config:set JWT_SECRET=your-secret-key
-gigalixir config:set DEFAULT_SEED_USERNAME=davide
-gigalixir config:set DEFAULT_SEED_EMAIL=davide@local
-gigalixir config:set DEFAULT_SEED_PASSWORD='2Kb!$fmhBxxmS%Yq'
-gigalixir git:remote -a anime-tracker
+gigalixir create -n ianime
+gigalixir pg:create --free -a ianime
+gigalixir config:set JWT_SECRET=your-secret-key -a ianime
+gigalixir config:set DEFAULT_SEED_USERNAME=davide -a ianime
+gigalixir config:set DEFAULT_SEED_EMAIL=davide@local -a ianime
+gigalixir config:set DEFAULT_SEED_PASSWORD='your-secure-password' -a ianime
+gigalixir config:set SEED_DEFAULT_USER=true -a ianime
+gigalixir config:set ALLOW_REGISTRATION=false -a ianime
+gigalixir git:remote -a ianime
 git push gigalixir main
 ```
 
-URL app: `https://anime-tracker.gigalixirapp.com`
+URL app: `https://ianime.gigalixirapp.com`
+
+### Icona PWA
+
+Le icone sono in `client/public/icons/`:
+
+| File | Uso |
+|------|-----|
+| `icon.png` | Favicon e logo nell'header |
+| `icon-192.png` | Manifest PWA (192×192) |
+| `icon-512.png` | Manifest PWA, Apple Touch Icon (512×512) |
+
+Il manifest è generato da `vite-plugin-pwa` in `client/vite.config.ts`. Dopo un aggiornamento icona, reinstallare la PWA sul dispositivo se l'icona home screen non si aggiorna subito.
 
 ## Variabili ambiente
 
@@ -76,9 +99,10 @@ URL app: `https://anime-tracker.gigalixirapp.com`
 | `DATABASE_URL` | Auto su Gigalixir; SQLite in dev |
 | `JWT_SECRET` | Chiave segreta JWT |
 | `DEFAULT_SEED_USERNAME` | Username utente seed (`davide`) |
-| `DEFAULT_SEED_PASSWORD` | Password utente seed |
+| `DEFAULT_SEED_PASSWORD` | Password utente seed (solo alla prima creazione) |
 | `DEFAULT_SEED_EMAIL` | Email placeholder seed |
 | `SEED_DEFAULT_USER` | `true` per creare utente all'avvio |
+| `ALLOW_REGISTRATION` | `false` in produzione (registrazione disabilitata) |
 | `CLIENT_URL` | URL frontend (CORS dev) |
 | `VITE_API_URL` | `/api` in produzione |
 
@@ -93,6 +117,7 @@ URL app: `https://anime-tracker.gigalixirapp.com`
 ```
 assistente_test/
 ├── client/          # React PWA
+│   └── public/icons/  # favicon + icone PWA
 ├── server/          # FastAPI + Alembic
 ├── scripts/         # build.sh
 ├── Procfile         # deploy Gigalixir
@@ -105,6 +130,7 @@ assistente_test/
 - Doppiaggio/sottotitoli IT: euristica da link AniList, non dati ufficiali geo-IT
 - Le piattaforme streaming sono indicative (AniList non filtra per Italia)
 - Non committare `.env` con password reali
+- `DEFAULT_SEED_PASSWORD` non aggiorna la password se l'utente seed esiste già: usa la pagina Account
 
 ## Licenza / crediti dati
 

@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     default_seed_email: str = "davide@local"
     default_seed_password: str = ""
     seed_default_user: bool = True
+    allow_registration: bool = False
 
 
 settings = Settings()

@@ -4,8 +4,9 @@ export default {
   theme: {
     extend: {
       colors: {
-        surface: { DEFAULT: '#0f0f14', card: '#1a1a24', hover: '#252532' },
-        accent: { DEFAULT: '#a855f7', light: '#c084fc' },
+        surface: { DEFAULT: '#0b1020', card: '#121a2e', hover: '#1a2540' },
+        accent: { DEFAULT: '#5b8def', light: '#7eb3ff', muted: '#3d5a80' },
+        brand: { DEFAULT: '#38bdf8', light: '#7dd3fc' },
       },
     },
   },

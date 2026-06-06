@@ -11,6 +11,10 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 def register(payload: RegisterRequest, db: Session = Depends(get_db)) -> UserResponse:
+    from app.config import settings
+
+    if not settings.allow_registration:
+        raise HTTPException(status_code=403, detail="Registrazione disabilitata")
     if db.query(User).filter(User.username == payload.username).first():
         raise HTTPException(status_code=400, detail="Username già in uso")
     if db.query(User).filter(User.email == payload.email).first():

@@ -59,9 +59,6 @@ export function LoginPage() {
           {loading ? 'Accesso...' : 'Accedi'}
         </button>
       </form>
-      <p className="mt-4 text-center text-sm text-gray-400">
-        <Link to="/register" className="text-accent-light hover:underline">Registrati</Link>
-      </p>
     </div>
   );
 }
