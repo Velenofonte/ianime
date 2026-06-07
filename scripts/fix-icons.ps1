@@ -2,6 +2,9 @@ Add-Type -AssemblyName System.Drawing
 $iconsDir = Join-Path $PSScriptRoot "..\client\public\icons" | Resolve-Path
 $sourceAsset = Join-Path $iconsDir "source\ianime-logo-approved.png"
 
+# Android maskable: contenuto nella safe zone (~80% diametro). Glow incluso → ~74%
+$scalePwa = 0.74
+
 function Get-IconBlue([System.Drawing.Bitmap]$bmp) {
   $r = 0; $g = 0; $b = 0; $n = 0
   $w = $bmp.Width; $h = $bmp.Height
@@ -19,7 +22,6 @@ function Get-IconBlue([System.Drawing.Bitmap]$bmp) {
 }
 
 function Test-OuterWhite([System.Drawing.Color]$c) {
-  # bianco esterno + anti-aliasing ai bordi arrotondati (non raggiunge la "i" interna)
   $c.R -gt 245 -and $c.G -gt 245 -and $c.B -gt 245
 }
 
@@ -78,12 +80,28 @@ function Save-Square([System.Drawing.Bitmap]$src, [string]$outPath, [int]$size) 
   $bmp.Dispose()
 }
 
+function Save-PwaIcon([System.Drawing.Bitmap]$art, [System.Drawing.Color]$bg, [string]$outPath, [int]$size, [double]$scale) {
+  $bmp = New-Object System.Drawing.Bitmap $size, $size
+  $g = [System.Drawing.Graphics]::FromImage($bmp)
+  $g.Clear($bg)
+  $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+  $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::HighQuality
+  $g.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+  $inner = [int]($size * $scale)
+  $x = [int](($size - $inner) / 2)
+  $y = [int](($size - $inner) / 2)
+  $g.DrawImage($art, $x, $y, $inner, $inner)
+  $g.Dispose()
+  $bmp.Save($outPath, [System.Drawing.Imaging.ImageFormat]::Png)
+  $bmp.Dispose()
+}
+
 if (-not (Test-Path $sourceAsset)) {
   Write-Error "Asset sorgente non trovato: $sourceAsset"
   exit 1
 }
 
-Write-Host "Generazione icone (crop + flood-fill angoli, proporzioni preservate)..."
+Write-Host "Generazione icone..."
 $loaded = [System.Drawing.Image]::FromFile($sourceAsset)
 Write-Host "Sorgente: $($loaded.Width)x$($loaded.Height)"
 $square = Get-CenterSquareCrop $loaded
@@ -93,10 +111,15 @@ $bg = Get-IconBlue $square
 Write-Host "Blu sfondo: RGB($($bg.R),$($bg.G),$($bg.B))"
 Remove-OuterWhite $square $bg
 
+# Header: composizione piena (Layout.tsx → /icons/icon.png)
 Save-Square $square (Join-Path $iconsDir "icon.png") 512
-Save-Square $square (Join-Path $iconsDir "icon-512.png") 512
-Save-Square $square (Join-Path $iconsDir "icon-192.png") 192
-Save-Square $square (Join-Path $iconsDir "icon-512-maskable.png") 512
-Save-Square $square (Join-Path $iconsDir "icon-192-maskable.png") 192
+
+# PWA manifest: logo ridotto nella safe zone Android (mask + glow)
+Write-Host "PWA scale: $scalePwa"
+Save-PwaIcon $square $bg (Join-Path $iconsDir "icon-512.png") 512 $scalePwa
+Save-PwaIcon $square $bg (Join-Path $iconsDir "icon-192.png") 192 $scalePwa
+Save-PwaIcon $square $bg (Join-Path $iconsDir "icon-512-maskable.png") 512 $scalePwa
+Save-PwaIcon $square $bg (Join-Path $iconsDir "icon-192-maskable.png") 192 $scalePwa
+
 $square.Dispose()
-Write-Host "Fatto."
+Write-Host "Fatto. Header=icon.png | PWA=icon-* (scale $scalePwa)"
