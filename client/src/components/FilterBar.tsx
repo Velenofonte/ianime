@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { fetchGenres } from '../services/anilist';
 import { useFilterStore } from '../store/filters';
-import { PLATFORM_OPTIONS, RELEASE_ORDER_OPTIONS, SCORE_FILTER_OPTIONS, STATUS_OPTIONS } from '../types/anime';
+import { PLATFORM_OPTIONS, RELEASE_ORDER_OPTIONS, SCORE_FILTER_OPTIONS, STATUS_OPTIONS, AIRING_DAY_OPTIONS } from '../types/anime';
 
 function countActiveFilters(filters: ReturnType<typeof useFilterStore.getState>) {
   let count = 0;
@@ -13,6 +13,7 @@ function countActiveFilters(filters: ReturnType<typeof useFilterStore.getState>)
   if (filters.releaseOrder) count += 1;
   if (filters.minStars > 0) count += 1;
   if (filters.platform) count += 1;
+  if (filters.airingDay) count += 1;
   return count;
 }
 function FilterField({ label, children }: { label: string; children: ReactNode }) {
@@ -101,6 +102,17 @@ export function FilterBar() {
                   >
                     {STATUS_OPTIONS.map((o) => (
                       <option key={o.value} value={o.value}>{o.label}</option>
+                    ))}
+                  </select>
+                </FilterField>
+                <FilterField label="Giorno uscita">
+                  <select
+                    value={filters.airingDay}
+                    onChange={(e) => filters.setAiringDay(e.target.value as typeof filters.airingDay)}
+                    className="rounded-lg border border-white/10 bg-surface px-3 py-2 text-sm"
+                  >
+                    {AIRING_DAY_OPTIONS.map((o) => (
+                      <option key={o.value || 'all'} value={o.value}>{o.label}</option>
                     ))}
                   </select>
                 </FilterField>

@@ -20,7 +20,8 @@ export default defineConfig({
         icons: [
           { src: '/icons/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
           { src: '/icons/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
-          { src: '/icons/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+          { src: '/icons/icon-192-maskable.png', sizes: '192x192', type: 'image/png', purpose: 'maskable' },
+          { src: '/icons/icon-512-maskable.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
         ],
       },
       workbox: {
@@ -33,8 +34,7 @@ export default defineConfig({
           },
           {
             urlPattern: /^https:\/\/graphql\.anilist\.co\/.*/i,
-            handler: 'NetworkFirst',
-            options: { cacheName: 'anilist-api', networkTimeoutSeconds: 5 },
+            handler: 'NetworkOnly',
           },
           {
             urlPattern: /^https:\/\/api\.jikan\.moe\/.*/i,
@@ -52,8 +52,9 @@ export default defineConfig({
   ],
   server: {
     port: 5173,
+    host: true,
     proxy: {
-      '/api': { target: 'http://localhost:8000', changeOrigin: true },
+      '/api': { target: 'http://127.0.0.1:8000', changeOrigin: true },
     },
   },
 });

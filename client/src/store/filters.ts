@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { AnimeFilters } from '../types/anime';
+import { EXCLUDED_GENRES, type AnimeFilters } from '../types/anime';
 
 interface FilterStore extends AnimeFilters {
   panelOpen: boolean;
@@ -10,6 +10,7 @@ interface FilterStore extends AnimeFilters {
   setReleaseOrder: (releaseOrder: AnimeFilters['releaseOrder']) => void;
   setMinStars: (minStars: number) => void;
   setPlatform: (platform: string) => void;
+  setAiringDay: (airingDay: AnimeFilters['airingDay']) => void;
   togglePanel: () => void;
   reset: () => void;
 }
@@ -22,18 +23,23 @@ const initial: AnimeFilters = {
   releaseOrder: '',
   minStars: 0,
   platform: '',
+  airingDay: '',
 };
 
 export const useFilterStore = create<FilterStore>((set) => ({
   ...initial,
   panelOpen: localStorage.getItem('ianime-filters-open') === '1',
   setSearch: (search) => set({ search }),
-  setGenres: (genres) => set({ genres }),
-  setStatus: (status) => set({ status }),
+  setGenres: (genres) =>
+    set({ genres: genres.filter((g) => !EXCLUDED_GENRES.includes(g as (typeof EXCLUDED_GENRES)[number])) }),
+  setStatus: (status) =>
+    set(status === 'RELEASING' ? { status } : { status, airingDay: '' }),
   setMinSeasons: (minSeasons) => set({ minSeasons }),
   setReleaseOrder: (releaseOrder) => set({ releaseOrder }),
   setMinStars: (minStars) => set({ minStars }),
   setPlatform: (platform) => set({ platform }),
+  setAiringDay: (airingDay) =>
+    set(airingDay ? { airingDay, status: 'RELEASING' } : { airingDay }),
   togglePanel: () =>
     set((state) => {
       const panelOpen = !state.panelOpen;

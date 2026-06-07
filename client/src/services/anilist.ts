@@ -1,9 +1,21 @@
 import DOMPurify from 'dompurify';
 import { starsToAnilistScore } from '../components/StarRating';
-import type { AnimeCard, AnimeStatus, ItalianAudioStatus } from '../types/anime';import { DAY_MAP, ITALIAN_PLATFORMS } from '../types/anime';
+import type { AnimeCard, AnimeStatus, FranchiseSeason, ItalianAudioStatus } from '../types/anime';
+import { DAY_MAP, EXCLUDED_GENRES, ITALIAN_PLATFORMS } from '../types/anime';
 import { fetchJikanBroadcast } from './jikan';
 
 const ANILIST_URL = 'https://graphql.anilist.co';
+
+export const ANIME_PAGE_SIZE = 20;
+export const MIN_VISIBLE_RESULTS = 20;
+
+const PLATFORM_ALIASES: Record<string, string[]> = {
+  'Disney Plus': ['disney', 'disney+', 'disney plus'],
+  'Prime Video': ['prime', 'amazon', 'prime video'],
+  Crunchyroll: ['crunchyroll'],
+  Netflix: ['netflix'],
+  VVVVID: ['vvvvid'],
+};
 
 const MEDIA_FIELDS = `
   id idMal
@@ -15,20 +27,152 @@ const MEDIA_FIELDS = `
   relations {
     edges {
       relationType
-      node { id format status }
+      node {
+        id format status episodes
+        title { romaji english }
+        coverImage { extraLarge }
+      }
     }
   }
 `;
 
+const STATUS_PRIORITY: AnimeStatus[] = ['RELEASING', 'NOT_YET_RELEASED', 'HIATUS', 'FINISHED'];
+
+const SEASON_NUMBER_PATTERNS: { regex: RegExp; group: number }[] = [
+  { regex: /\s*:?\s*season\s*(\d+)\b/i, group: 1 },
+  { regex: /\b(\d+)(?:st|nd|rd|th)\s+season\b/i, group: 1 },
+];
+
+const STRIP_SUFFIX_PATTERNS: RegExp[] = [
+  /\s*:?\s*season\s*\d+\b/i,
+  /\b\d+(?:st|nd|rd|th)\s+season\b/i,
+  /\s*:?\s*part\s*\d+\b/i,
+  /\s*:?\s*cour\s*\d+\b/i,
+  /\s*:?\s*final\s+season\b/i,
+];
+
+function extractSeasonNumber(title: string): number | null {
+  for (const { regex, group } of SEASON_NUMBER_PATTERNS) {
+    const match = title.match(regex);
+    if (match?.[group]) return Number.parseInt(match[group], 10);
+  }
+  return null;
+}
+
+function stripAllSeasonSuffixes(title: string): { base: string; isSeasonEntry: boolean } {
+  let working = title;
+  let isSeasonEntry = false;
+  let prev = '';
+
+  while (prev !== working) {
+    prev = working;
+    for (const regex of STRIP_SUFFIX_PATTERNS) {
+      if (regex.test(working)) {
+        working = working.replace(regex, '').trim().replace(/\s*:\s*$/, '').trim();
+        isSeasonEntry = true;
+      }
+    }
+  }
+
+  return { base: working || title, isSeasonEntry };
+}
+
+export interface ParsedFranchiseTitle {
+  franchiseTitle: string;
+  seasonNumber: number | null;
+  isSeasonEntry: boolean;
+  titleSlug: string;
+}
+
+export function slugifyTitle(title: string): string {
+  return title
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '');
+}
+
+export function parseFranchiseTitle(english: string | null, romaji: string): ParsedFranchiseTitle {
+  const candidates = [english, romaji].filter(Boolean) as string[];
+
+  let best: ParsedFranchiseTitle | null = null;
+
+  for (const title of candidates) {
+    const seasonNumber = extractSeasonNumber(title);
+    const { base, isSeasonEntry } = stripAllSeasonSuffixes(title);
+    if (!base) continue;
+
+    const parsed: ParsedFranchiseTitle = {
+      franchiseTitle: base,
+      seasonNumber,
+      isSeasonEntry: isSeasonEntry || seasonNumber !== null,
+      titleSlug: slugifyTitle(base),
+    };
+
+    if (!best || (parsed.isSeasonEntry && !best.isSeasonEntry) || base.length < best.franchiseTitle.length) {
+      best = parsed;
+    }
+  }
+
+  if (best) return best;
+
+  const franchiseTitle = english || romaji;
+  return {
+    franchiseTitle,
+    seasonNumber: null,
+    isSeasonEntry: false,
+    titleSlug: slugifyTitle(franchiseTitle),
+  };
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isRateLimitError(message: string, status: number): boolean {
+  return status === 429 || /too many requests/i.test(message);
+}
+
 export async function anilistQuery<T>(query: string, variables: Record<string, unknown> = {}): Promise<T> {
-  const res = await fetch(ANILIST_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: JSON.stringify({ query, variables }),
-  });
-  const json = await res.json();
-  if (json.errors) throw new Error(json.errors[0]?.message || 'Errore AniList');
-  return json.data;
+  const body = JSON.stringify({ query, variables });
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const res = await fetch(ANILIST_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body,
+      });
+      const json = await res.json();
+      const message = json.errors?.[0]?.message || res.statusText;
+
+      if (json.errors && isRateLimitError(message, res.status)) {
+        if (attempt < 2) {
+          await sleep(1500 * (attempt + 1));
+          continue;
+        }
+      }
+
+      if (json.errors) throw new Error(message || 'Errore AniList');
+      return json.data;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '';
+      lastError =
+        msg === 'Failed to fetch'
+          ? new Error('Connessione ad AniList non disponibile. Riprova tra qualche secondo.')
+          : err instanceof Error
+            ? err
+            : new Error('Errore di rete');
+      if (attempt < 2) {
+        await sleep(1500 * (attempt + 1));
+        continue;
+      }
+    }
+  }
+
+  throw lastError ?? new Error('Errore AniList');
 }
 
 export async function fetchGenres(): Promise<string[]> {
@@ -54,17 +198,33 @@ const FEATURED_GENRES = [
 ] as const;
 
 export function sortGenresForFilter(genres: string[]): string[] {
-  const featured = FEATURED_GENRES.filter((g) => genres.includes(g));
+  const excluded = new Set<string>(EXCLUDED_GENRES);
+  const allowed = genres.filter((g) => !excluded.has(g));
+  const featured = FEATURED_GENRES.filter((g) => allowed.includes(g));
   const featuredSet = new Set<string>(featured);
-  const rest = genres.filter((g) => !featuredSet.has(g)).sort((a, b) => a.localeCompare(b, 'it'));
+  const rest = allowed.filter((g) => !featuredSet.has(g)).sort((a, b) => a.localeCompare(b, 'it'));
   return [...featured, ...rest];
 }
 
-function countSeasons(relations: { edges: { relationType: string; node: { format: string } }[] }): number {
-  const sequels = relations.edges.filter(
-    (e) => e.relationType === 'SEQUEL' && e.node.format === 'TV'
-  ).length;
-  return Math.max(1, sequels + 1);
+export function isExcludedRawMedia(raw: { genres?: string[] }): boolean {
+  return raw.genres?.some((g) => EXCLUDED_GENRES.includes(g as (typeof EXCLUDED_GENRES)[number])) ?? false;
+}
+
+export function isExcludedAnime(anime: AnimeCard): boolean {
+  return anime.genres.some((g) => EXCLUDED_GENRES.includes(g as (typeof EXCLUDED_GENRES)[number]));
+}
+
+function isTvSeasonFormat(format: string): boolean {
+  return format === 'TV' || format === 'TV_SHORT';
+}
+
+export function matchesPlatform(platforms: string[], filterValue: string): boolean {
+  if (!filterValue) return true;
+  const aliases = PLATFORM_ALIASES[filterValue] ?? [filterValue.toLowerCase()];
+  return platforms.some((p) => {
+    const lower = p.toLowerCase();
+    return aliases.some((alias) => lower.includes(alias));
+  });
 }
 
 function inferItalianAudio(links: { site: string; language: string | null }[]): ItalianAudioStatus {
@@ -76,10 +236,19 @@ function inferItalianAudio(links: { site: string; language: string | null }[]): 
   return 'unknown';
 }
 
-function statusLabel(status: AnimeStatus): string {
+export function statusLabel(status: AnimeStatus): string {
   if (status === 'RELEASING') return 'In corso';
   if (status === 'FINISHED') return 'Completo';
   if (status === 'NOT_YET_RELEASED') return 'In arrivo';
+  if (status === 'HIATUS') return 'In pausa';
+  return status;
+}
+
+export function seasonStatusLabel(status: AnimeStatus): string {
+  if (status === 'RELEASING') return 'In corso';
+  if (status === 'FINISHED') return 'Conclusa';
+  if (status === 'NOT_YET_RELEASED') return 'In arrivo';
+  if (status === 'HIATUS') return 'In pausa';
   return status;
 }
 
@@ -87,6 +256,15 @@ function italianAudioLabel(s: ItalianAudioStatus): string {
   if (s === 'dub') return 'Doppiato IT';
   if (s === 'sub') return 'Sottotitoli IT';
   return 'Non verificato';
+}
+
+interface RawRelationNode {
+  id: number;
+  format: string;
+  status: string;
+  episodes: number | null;
+  title?: { romaji: string; english: string | null };
+  coverImage?: { extraLarge: string };
 }
 
 interface RawMedia {
@@ -101,15 +279,314 @@ interface RawMedia {
   averageScore: number | null;
   nextAiringEpisode: { airingAt: number } | null;
   externalLinks: { site: string; url: string; language: string | null; type: string }[];
-  relations: { edges: { relationType: string; node: { id: number; format: string; status: string } }[] };
+  relations: { edges: { relationType: string; node: RawRelationNode }[] };
 }
 
-export async function normalizeMedia(raw: RawMedia, broadcast?: { day: string | null; time: string | null }): Promise<AnimeCard> {
+function relationNodeTitle(node: RawRelationNode): string {
+  return node.title?.english || node.title?.romaji || `Anime #${node.id}`;
+}
+
+function sortFranchiseSeasons(seasons: FranchiseSeason[]): FranchiseSeason[] {
+  return [...seasons].sort((a, b) => {
+    const aNum = a.seasonNumber ?? Number.MAX_SAFE_INTEGER;
+    const bNum = b.seasonNumber ?? Number.MAX_SAFE_INTEGER;
+    if (aNum !== bNum) return aNum - bNum;
+    return a.id - b.id;
+  });
+}
+
+function rawToFranchiseSeason(raw: RawMedia): FranchiseSeason {
+  const parsed = parseFranchiseTitle(raw.title.english, raw.title.romaji);
+  return {
+    id: raw.id,
+    title: raw.title.english || raw.title.romaji,
+    status: raw.status,
+    episodes: raw.episodes,
+    seasonNumber: parsed.seasonNumber ?? (parsed.isSeasonEntry ? null : 1),
+    coverImage: raw.coverImage?.extraLarge || '',
+  };
+}
+
+function seasonFromRelationNode(node: RawRelationNode): FranchiseSeason {
+  const english = node.title?.english ?? null;
+  const romaji = node.title?.romaji ?? relationNodeTitle(node);
+  const parsed = parseFranchiseTitle(english, romaji);
+  return {
+    id: node.id,
+    title: relationNodeTitle(node),
+    status: node.status as AnimeStatus,
+    episodes: node.episodes ?? null,
+    seasonNumber: parsed.seasonNumber,
+    coverImage: node.coverImage?.extraLarge || '',
+  };
+}
+
+function collectTvSeasonEdges(raw: RawMedia) {
+  return raw.relations.edges.filter(
+    (e) =>
+      (e.relationType === 'SEQUEL' || e.relationType === 'PREQUEL') &&
+      isTvSeasonFormat(e.node.format)
+  );
+}
+
+const MAX_FRANCHISE_FETCHES = 8;
+const FRANCHISE_FETCH_DELAY_MS = 700;
+
+const rawMediaCache = new Map<number, Promise<RawMedia | null>>();
+
+async function fetchRawMediaById(id: number): Promise<RawMedia | null> {
+  let pending = rawMediaCache.get(id);
+  if (!pending) {
+    pending = anilistQuery<{ Media: RawMedia | null }>(
+      `query ($id: Int) { Media(id: $id, type: ANIME) { ${MEDIA_FIELDS} } }`,
+      { id }
+    ).then((data) => data.Media);
+    rawMediaCache.set(id, pending);
+  }
+  return pending;
+}
+
+async function fetchFullFranchiseSeasons(startRaw: RawMedia): Promise<FranchiseSeason[]> {
+  const seasons = new Map<number, FranchiseSeason>();
+  const expanded = new Set<number>();
+  const queue = [startRaw.id];
+  const rawCache = new Map<number, RawMedia>([[startRaw.id, startRaw]]);
+
+  seasons.set(startRaw.id, rawToFranchiseSeason(startRaw));
+
+  try {
+    while (queue.length > 0 && expanded.size < MAX_FRANCHISE_FETCHES) {
+      const id = queue.shift()!;
+      if (expanded.has(id)) continue;
+      expanded.add(id);
+
+      let raw = rawCache.get(id);
+      if (!raw) {
+        await sleep(FRANCHISE_FETCH_DELAY_MS);
+        try {
+          raw = (await fetchRawMediaById(id)) ?? undefined;
+        } catch {
+          break;
+        }
+        if (!raw) continue;
+        rawCache.set(id, raw);
+        seasons.set(id, rawToFranchiseSeason(raw));
+      }
+
+      for (const edge of collectTvSeasonEdges(raw)) {
+        const node = edge.node;
+        if (!seasons.has(node.id)) {
+          seasons.set(node.id, seasonFromRelationNode(node));
+        }
+        if (!expanded.has(node.id)) queue.push(node.id);
+      }
+    }
+  } catch {
+    // usa i risultati parziali raccolti fino a qui
+  }
+
+  if (seasons.size <= 1) return buildFranchiseSeasons(startRaw);
+  return sortFranchiseSeasons([...seasons.values()]);
+}
+
+function buildFranchiseSeasons(raw: RawMedia): FranchiseSeason[] {
+  const parsedSelf = parseFranchiseTitle(raw.title.english, raw.title.romaji);
+  const seasons = new Map<number, FranchiseSeason>();
+
+  seasons.set(raw.id, {
+    id: raw.id,
+    title: raw.title.english || raw.title.romaji,
+    status: raw.status,
+    episodes: raw.episodes,
+    seasonNumber: parsedSelf.seasonNumber ?? (parsedSelf.isSeasonEntry ? null : 1),
+    coverImage: raw.coverImage?.extraLarge || '',
+  });
+
+  for (const edge of raw.relations.edges) {
+    if (edge.relationType !== 'SEQUEL' && edge.relationType !== 'PREQUEL') continue;
+    if (!isTvSeasonFormat(edge.node.format)) continue;
+
+    const node = edge.node;
+    const nodeEnglish = node.title?.english ?? null;
+    const nodeRomaji = node.title?.romaji ?? relationNodeTitle(node);
+    const parsed = parseFranchiseTitle(nodeEnglish, nodeRomaji);
+
+    seasons.set(node.id, {
+      id: node.id,
+      title: relationNodeTitle(node),
+      status: node.status as AnimeStatus,
+      episodes: node.episodes ?? null,
+      seasonNumber: parsed.seasonNumber,
+      coverImage: node.coverImage?.extraLarge || '',
+    });
+  }
+
+  return sortFranchiseSeasons([...seasons.values()]);
+}
+
+function aggregateFranchiseStatus(seasons: FranchiseSeason[]): AnimeStatus {
+  for (const status of STATUS_PRIORITY) {
+    if (seasons.some((s) => s.status === status)) return status;
+  }
+  return seasons[0]?.status ?? 'FINISHED';
+}
+
+function computeSeasonCount(seasons: FranchiseSeason[]): number {
+  const seasonNumbers = seasons
+    .map((s) => s.seasonNumber)
+    .filter((n): n is number => n !== null);
+  const maxSeason = seasonNumbers.length ? Math.max(...seasonNumbers) : 0;
+  if (maxSeason > 0) return maxSeason;
+  return Math.max(seasons.length, 1);
+}
+
+function pickCanonicalSeason(seasons: FranchiseSeason[], fallbackId: number): FranchiseSeason {
+  const releasing = seasons.find((s) => s.status === 'RELEASING');
+  if (releasing) return releasing;
+
+  const upcoming = seasons.find((s) => s.status === 'NOT_YET_RELEASED');
+  if (upcoming) return upcoming;
+
+  const withNumber = seasons.filter((s) => s.seasonNumber !== null);
+  if (withNumber.length) {
+    return withNumber.reduce((best, s) =>
+      (s.seasonNumber ?? 0) > (best.seasonNumber ?? 0) ? s : best
+    );
+  }
+
+  return seasons.find((s) => s.id === fallbackId) ?? seasons[seasons.length - 1];
+}
+
+function deriveFranchiseFields(raw: RawMedia, seasonsOverride?: FranchiseSeason[]) {
+  const parsed = parseFranchiseTitle(raw.title.english, raw.title.romaji);
+  const seasons = seasonsOverride ?? buildFranchiseSeasons(raw);
+  const firstSeason = seasons.find((s) => s.seasonNumber === 1);
+  const franchiseTitle = firstSeason
+    ? parseFranchiseTitle(firstSeason.title, firstSeason.title).franchiseTitle
+    : parsed.franchiseTitle;
+  const titleSlug = slugifyTitle(franchiseTitle);
+  const franchiseStatus = aggregateFranchiseStatus(seasons);
+  const seasonCount = computeSeasonCount(seasons);
+  const canonical = pickCanonicalSeason(seasons, raw.id);
+  const minSeasonId = Math.min(...seasons.map((s) => s.id));
+
+  return {
+    franchiseKey: `${titleSlug}::${minSeasonId}`,
+    franchiseTitle,
+    titleSlug,
+    seasonNumber: parsed.seasonNumber,
+    isSeasonEntry: parsed.isSeasonEntry,
+    franchiseStatus,
+    franchiseStatusLabel: statusLabel(franchiseStatus),
+    seasons,
+    seasonCount,
+    canonicalSeasonId: canonical.id,
+    canonicalCoverImage: canonical.coverImage || raw.coverImage?.extraLarge || '',
+  };
+}
+
+function seasonIdsForCard(card: AnimeCard): number[] {
+  const ids = card.seasons.map((s) => s.id);
+  return ids.length ? ids : [card.id];
+}
+
+function cardsShareFranchise(a: AnimeCard, b: AnimeCard): boolean {
+  if (a.titleSlug !== b.titleSlug) return false;
+
+  const aIds = new Set(seasonIdsForCard(a));
+  if (b.seasons.some((s) => aIds.has(s.id))) return true;
+
+  return a.isSeasonEntry || b.isSeasonEntry;
+}
+
+function mergeSeasons(cards: AnimeCard[]): FranchiseSeason[] {
+  const merged = new Map<number, FranchiseSeason>();
+  for (const card of cards) {
+    for (const season of card.seasons) {
+      merged.set(season.id, season);
+    }
+  }
+  return [...merged.values()].sort((a, b) => {
+    const aNum = a.seasonNumber ?? Number.MAX_SAFE_INTEGER;
+    const bNum = b.seasonNumber ?? Number.MAX_SAFE_INTEGER;
+    if (aNum !== bNum) return aNum - bNum;
+    return a.id - b.id;
+  });
+}
+
+function pickRepresentativeCard(cards: AnimeCard[]): AnimeCard {
+  const releasing = cards.find((c) => c.franchiseStatus === 'RELEASING' || c.status === 'RELEASING');
+  if (releasing) return releasing;
+
+  return cards.reduce((best, card) => {
+    const bestNum = best.seasonNumber ?? 0;
+    const cardNum = card.seasonNumber ?? 0;
+    if (cardNum > bestNum) return card;
+    if (cardNum === bestNum && card.id > best.id) return card;
+    return best;
+  });
+}
+
+function mergeFranchiseCards(cards: AnimeCard[]): AnimeCard {
+  const base = pickRepresentativeCard(cards);
+  const seasons = mergeSeasons(cards);
+  const franchiseStatus = aggregateFranchiseStatus(seasons);
+  const seasonCount = computeSeasonCount(seasons);
+  const canonical = pickCanonicalSeason(seasons, base.canonicalSeasonId);
+  const minSeasonId = Math.min(...seasons.map((s) => s.id));
+
+  const airingCard =
+    cards.find((c) => c.status === 'RELEASING' && c.airingDay) ??
+    cards.find((c) => c.franchiseStatus === 'RELEASING' && c.airingDay) ??
+    base;
+
+  return {
+    ...base,
+    id: canonical.id,
+    coverImage: canonical.coverImage || base.coverImage,
+    franchiseKey: `${base.titleSlug}::${minSeasonId}`,
+    franchiseStatus,
+    franchiseStatusLabel: statusLabel(franchiseStatus),
+    seasons,
+    seasonCount,
+    canonicalSeasonId: canonical.id,
+    airingDay: airingCard.airingDay,
+    airingTime: airingCard.airingTime,
+    status: airingCard.status,
+    statusLabel: statusLabel(airingCard.status),
+  };
+}
+
+export function collapseFranchises(cards: AnimeCard[]): AnimeCard[] {
+  const groups: AnimeCard[][] = [];
+
+  for (const card of cards) {
+    let placed = false;
+    for (const group of groups) {
+      if (group.some((existing) => cardsShareFranchise(existing, card))) {
+        group.push(card);
+        placed = true;
+        break;
+      }
+    }
+    if (!placed) groups.push([card]);
+  }
+
+  return groups.map((group) => (group.length === 1 ? group[0] : mergeFranchiseCards(group)));
+}
+
+export async function normalizeMedia(
+  raw: RawMedia,
+  broadcast?: { day: string | null; time: string | null },
+  seasonsOverride?: FranchiseSeason[]
+): Promise<AnimeCard> {
   const platforms = [...new Set(raw.externalLinks.map((l) => l.site).filter(Boolean))];
   const italianPlatforms = platforms.filter((p) =>
     ITALIAN_PLATFORMS.some((ip) => p.toLowerCase().includes(ip.toLowerCase().replace('+', '')))
   );
   const italianAudio = inferItalianAudio(raw.externalLinks);
+  const franchise = deriveFranchiseFields(raw, seasonsOverride);
+
   let airingDay: string | null = null;
   let airingTime: string | null = null;
   if (broadcast?.day) {
@@ -127,11 +604,11 @@ export async function normalizeMedia(raw: RawMedia, broadcast?: { day: string | 
     idMal: raw.idMal,
     title: raw.title.english || raw.title.romaji,
     titleEnglish: raw.title.english,
-    coverImage: raw.coverImage?.extraLarge || '',
+    coverImage: franchise.canonicalCoverImage,
     genres: raw.genres || [],
     description: DOMPurify.sanitize(raw.description || 'Nessuna descrizione disponibile.', { ALLOWED_TAGS: [] }),
     episodes: raw.episodes,
-    seasonCount: countSeasons(raw.relations),
+    seasonCount: franchise.seasonCount,
     status: raw.status,
     statusLabel: statusLabel(raw.status),
     italianAudio,
@@ -141,6 +618,15 @@ export async function normalizeMedia(raw: RawMedia, broadcast?: { day: string | 
     platforms,
     italianPlatforms,
     averageScore: raw.averageScore ?? null,
+    franchiseKey: franchise.franchiseKey,
+    franchiseTitle: franchise.franchiseTitle,
+    titleSlug: franchise.titleSlug,
+    seasonNumber: franchise.seasonNumber,
+    isSeasonEntry: franchise.isSeasonEntry,
+    franchiseStatus: franchise.franchiseStatus,
+    franchiseStatusLabel: franchise.franchiseStatusLabel,
+    seasons: franchise.seasons,
+    canonicalSeasonId: franchise.canonicalSeasonId,
   };
 }
 
@@ -151,7 +637,6 @@ export interface FetchAnimeParams {
   status?: AnimeStatus | '';
   releaseOrder?: '' | 'recent' | 'oldest';
   minStars?: number;
-  licensedBy?: number[];
 }
 
 function resolveSort(releaseOrder: '' | 'recent' | 'oldest' | undefined): string[] {
@@ -162,14 +647,23 @@ function resolveSort(releaseOrder: '' | 'recent' | 'oldest' | undefined): string
 
 export async function fetchTrendingAnime(params: FetchAnimeParams = {}): Promise<{ media: AnimeCard[]; hasNextPage: boolean }> {
   const query = `
-    query ($page: Int, $search: String, $genres: [String], $status: MediaStatus, $sort: [MediaSort], $minScore: Int) {
-      Page(page: $page, perPage: 20) {
+    query (
+      $page: Int
+      $search: String
+      $genres: [String]
+      $excludedGenres: [String]
+      $status: MediaStatus
+      $sort: [MediaSort]
+      $minScore: Int
+    ) {
+      Page(page: $page, perPage: ${ANIME_PAGE_SIZE}) {
         pageInfo { hasNextPage }
         media(
           type: ANIME
           sort: $sort
           search: $search
           genre_in: $genres
+          genre_not_in: $excludedGenres
           status: $status
           averageScore_greater: $minScore
         ) {
@@ -182,59 +676,80 @@ export async function fetchTrendingAnime(params: FetchAnimeParams = {}): Promise
     page: params.page || 1,
     search: params.search || undefined,
     genres: params.genres?.length ? params.genres : undefined,
+    excludedGenres: [...EXCLUDED_GENRES],
     status: params.status || undefined,
     sort: resolveSort(params.releaseOrder),
     minScore: params.minStars && params.minStars > 0 ? starsToAnilistScore(params.minStars) : undefined,
   });
 
-  const rawList = data.Page.media;
-  const malIds = rawList.filter((m) => m.status === 'RELEASING' && m.idMal).map((m) => m.idMal!);
-  const broadcasts = await Promise.all(
-    malIds.slice(0, 10).map(async (id) => ({ id, b: await fetchJikanBroadcast(id) }))
-  );
-  const broadcastMap = Object.fromEntries(broadcasts.map(({ id, b }) => [id, b]));
-
-  let media = await Promise.all(
-    rawList.map((raw) => normalizeMedia(raw, raw.idMal ? broadcastMap[raw.idMal] : undefined))
-  );
-
-  if (params.licensedBy?.length) {
-    // client-side platform filter fallback by site name
-  }
+  const rawList = data.Page.media.filter((raw) => !isExcludedRawMedia(raw));
+  const media = await Promise.all(rawList.map((raw) => normalizeMedia(raw)));
   return { media, hasNextPage: data.Page.pageInfo.hasNextPage };
 }
 
 export async function fetchAnimeById(id: number): Promise<AnimeCard | null> {
-  const query = `query ($id: Int) { Media(id: $id, type: ANIME) { ${MEDIA_FIELDS} } }`;
-  const data = await anilistQuery<{ Media: RawMedia | null }>(query, { id });
-  if (!data.Media) return null;
+  let raw: RawMedia | null;
+  try {
+    raw = await fetchRawMediaById(id);
+  } catch {
+    return null;
+  }
+  if (!raw) return null;
+
+  let fullSeasons: FranchiseSeason[];
+  try {
+    fullSeasons = await fetchFullFranchiseSeasons(raw);
+  } catch {
+    fullSeasons = buildFranchiseSeasons(raw);
+  }
+
   let broadcast;
-  if (data.Media.idMal) broadcast = await fetchJikanBroadcast(data.Media.idMal);
-  return normalizeMedia(data.Media, broadcast);
+  if (raw.idMal) broadcast = await fetchJikanBroadcast(raw.idMal);
+  return normalizeMedia(raw, broadcast, fullSeasons);
 }
 
 export async function fetchAnimeByIds(ids: number[]): Promise<AnimeCard[]> {
   if (!ids.length) return [];
   const results: AnimeCard[] = [];
   for (const id of ids) {
-    const query = `query ($id: Int) { Media(id: $id, type: ANIME) { ${MEDIA_FIELDS} } }`;
-    const data = await anilistQuery<{ Media: RawMedia }>(query, { id });
-    if (data.Media) {
+    try {
+      const raw = await fetchRawMediaById(id);
+      if (!raw) continue;
       let broadcast;
-      if (data.Media.idMal) broadcast = await fetchJikanBroadcast(data.Media.idMal);
-      results.push(await normalizeMedia(data.Media, broadcast));
+      if (raw.idMal) broadcast = await fetchJikanBroadcast(raw.idMal);
+      results.push(await normalizeMedia(raw, broadcast));
+    } catch {
+      // salta voci non caricabili
     }
   }
   return results;
 }
 
+export function matchesAiringDay(anime: AnimeCard, day: string): boolean {
+  if (!anime.airingDay) return false;
+  const normalized = Object.entries(DAY_MAP).find(([, v]) => v === day)?.[0];
+  return anime.airingDay === day || anime.airingDay === normalized;
+}
+
 export function filterAnimeClientSide(
   media: AnimeCard[],
-  filters: { minSeasons: number; platform: string }
+  filters: {
+    minSeasons: number;
+    platform: string;
+    status?: AnimeStatus | '';
+    airingDay?: string;
+  }
 ): AnimeCard[] {
   return media.filter((a) => {
+    if (isExcludedAnime(a)) return false;
     if (filters.minSeasons > 0 && a.seasonCount < filters.minSeasons) return false;
-    if (filters.platform && !a.platforms.some((p) => p.toLowerCase().includes(filters.platform.toLowerCase()))) return false;
+    if (filters.platform && !matchesPlatform(a.platforms, filters.platform)) return false;
+    if (filters.status === 'FINISHED' && a.franchiseStatus !== 'FINISHED') return false;
+    if (filters.status === 'RELEASING' && a.franchiseStatus !== 'RELEASING') return false;
+    if (filters.airingDay) {
+      if (a.franchiseStatus !== 'RELEASING') return false;
+      if (!matchesAiringDay(a, filters.airingDay)) return false;
+    }
     return true;
   });
 }

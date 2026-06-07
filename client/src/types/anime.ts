@@ -2,6 +2,15 @@ export type AnimeStatus = 'RELEASING' | 'FINISHED' | 'NOT_YET_RELEASED' | 'CANCE
 
 export type ItalianAudioStatus = 'dub' | 'sub' | 'unknown';
 
+export interface FranchiseSeason {
+  id: number;
+  title: string;
+  status: AnimeStatus;
+  episodes: number | null;
+  seasonNumber: number | null;
+  coverImage: string;
+}
+
 export interface AnimeCard {
   id: number;
   idMal: number | null;
@@ -21,7 +30,28 @@ export interface AnimeCard {
   platforms: string[];
   italianPlatforms: string[];
   averageScore: number | null;
+  franchiseKey: string;
+  franchiseTitle: string;
+  titleSlug: string;
+  seasonNumber: number | null;
+  isSeasonEntry: boolean;
+  franchiseStatus: AnimeStatus;
+  franchiseStatusLabel: string;
+  seasons: FranchiseSeason[];
+  canonicalSeasonId: number;
 }
+
+export const WEEK_DAYS = [
+  'Lunedì',
+  'Martedì',
+  'Mercoledì',
+  'Giovedì',
+  'Venerdì',
+  'Sabato',
+  'Domenica',
+] as const;
+
+export type WeekDay = (typeof WEEK_DAYS)[number];
 
 export interface AnimeFilters {
   search: string;
@@ -31,6 +61,7 @@ export interface AnimeFilters {
   releaseOrder: '' | 'recent' | 'oldest';
   minStars: number;
   platform: string;
+  airingDay: '' | WeekDay;
 }
 
 export interface NewsArticle {
@@ -50,6 +81,8 @@ export interface User {
 }
 
 export const ITALIAN_PLATFORMS = ['Crunchyroll', 'Netflix', 'Prime Video', 'Disney Plus', 'Disney+', 'VVVVID', 'Anime Generation'];
+
+export const EXCLUDED_GENRES = ['Hentai'] as const;
 
 export const PLATFORM_OPTIONS = [
   { label: 'Tutte', value: '' },
@@ -80,6 +113,11 @@ export const SCORE_FILTER_OPTIONS = [
   { label: '4+ ★', value: 4 },
   { label: '5 ★', value: 5 },
 ] as const;
+
+export const AIRING_DAY_OPTIONS: { label: string; value: '' | WeekDay }[] = [
+  { label: 'Tutti', value: '' },
+  ...WEEK_DAYS.map((d) => ({ label: d, value: d })),
+];
 
 export const DAY_MAP: Record<string, string> = {
   monday: 'Lunedì',

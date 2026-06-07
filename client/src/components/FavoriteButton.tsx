@@ -3,10 +3,19 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../services/api';
 
-export function FavoriteButton({ anilistId, inline = false }: { anilistId: number; inline?: boolean }) {
+export function FavoriteButton({
+  anilistId,
+  relatedIds,
+  inline = false,
+}: {
+  anilistId: number;
+  relatedIds?: number[];
+  inline?: boolean;
+}) {
   const { user } = useAuth();
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const ids = relatedIds?.length ? relatedIds : [anilistId];
 
   const { data: favorites = [] } = useQuery({
     queryKey: ['favorites'],
@@ -14,7 +23,7 @@ export function FavoriteButton({ anilistId, inline = false }: { anilistId: numbe
     enabled: !!user,
   });
 
-  const isFavorite = favorites.includes(anilistId);
+  const isFavorite = ids.some((id) => favorites.includes(id));
 
   const toggle = useMutation({
     mutationFn: async () => {
@@ -22,8 +31,11 @@ export function FavoriteButton({ anilistId, inline = false }: { anilistId: numbe
         navigate('/login');
         return;
       }
-      if (isFavorite) await api.removeFavorite(anilistId);
-      else await api.addFavorite(anilistId);
+      if (isFavorite) {
+        await Promise.all(ids.filter((id) => favorites.includes(id)).map((id) => api.removeFavorite(id)));
+      } else {
+        await api.addFavorite(anilistId);
+      }
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['favorites'] }),
   });

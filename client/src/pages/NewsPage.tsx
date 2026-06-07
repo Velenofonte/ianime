@@ -1,7 +1,7 @@
-import { useQuery } from '@tanstack/react-query';
+import { useInfiniteQuery } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { it } from 'date-fns/locale';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { fetchNews } from '../services/aninews';
 
 const SOURCES = [
@@ -14,11 +14,34 @@ const SOURCES = [
 
 export function NewsPage() {
   const [source, setSource] = useState('all');
-  const { data, isLoading, error } = useQuery({
+  const sentinelRef = useRef<HTMLDivElement>(null);
+
+  const query = useInfiniteQuery({
     queryKey: ['news', source],
-    queryFn: () => fetchNews(20, source),
+    queryFn: ({ pageParam }) => fetchNews(20, source, pageParam),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last) => (last.hasMore ? last.nextCursor : undefined),
     staleTime: 900000,
   });
+
+  const articles = query.data?.pages.flatMap((p) => p.articles) ?? [];
+
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el || !query.hasNextPage) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting && query.hasNextPage && !query.isFetching) {
+          query.fetchNextPage();
+        }
+      },
+      { rootMargin: '400px' }
+    );
+
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [query.hasNextPage, query.isFetching, query.fetchNextPage, articles.length]);
 
   return (
     <div>
@@ -36,10 +59,13 @@ export function NewsPage() {
           </button>
         ))}
       </div>
-      {isLoading && <p className="text-gray-400">Caricamento news...</p>}
-      {error && <p className="text-red-400">Errore: {(error as Error).message}</p>}
+      {query.isLoading && <p className="text-gray-400">Caricamento news...</p>}
+      {query.isError && <p className="text-red-400">Errore: {(query.error as Error).message}</p>}
+      {!query.isLoading && articles.length === 0 && !query.isError && (
+        <p className="text-gray-400">Nessuna news disponibile.</p>
+      )}
       <div className="space-y-4">
-        {data?.articles.map((article) => (
+        {articles.map((article) => (
           <a
             key={article.slug}
             href={article.link}
@@ -61,6 +87,26 @@ export function NewsPage() {
           </a>
         ))}
       </div>
+
+      {query.hasNextPage && (
+        <div ref={sentinelRef} className="mt-8">
+          {query.isFetchingNextPage ? (
+            <div className="flex items-center justify-center gap-3 text-gray-400">
+              <div
+                className="h-6 w-6 animate-spin rounded-full border-2 border-accent border-t-transparent"
+                aria-hidden
+              />
+              <span>Caricamento altre news...</span>
+            </div>
+          ) : (
+            <div className="h-4" aria-hidden />
+          )}
+        </div>
+      )}
+
+      {!query.hasNextPage && articles.length > 0 && (
+        <p className="mt-8 text-center text-sm text-gray-500">Fine news.</p>
+      )}
     </div>
   );
 }

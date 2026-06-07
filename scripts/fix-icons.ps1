@@ -1,80 +1,102 @@
 Add-Type -AssemblyName System.Drawing
 $iconsDir = Join-Path $PSScriptRoot "..\client\public\icons" | Resolve-Path
-$backupDir = Join-Path $iconsDir "backup"
-$cleanAsset = "C:\Users\DAVIDE_RS\.cursor\projects\c-Users-DAVIDE-RS-workspace-assistente-test\assets\ianime-logo-maskable-clean.png"
-$stamp = "20260607"
+$sourceAsset = Join-Path $iconsDir "source\ianime-logo-approved.png"
 
-function Get-SquareCrop([System.Drawing.Image]$img) {
-  $size = [Math]::Min($img.Width, $img.Height)
-  $x = [int](($img.Width - $size) / 2)
-  $y = [int](($img.Height - $size) / 2)
+function Get-IconBlue([System.Drawing.Bitmap]$bmp) {
+  $r = 0; $g = 0; $b = 0; $n = 0
+  $w = $bmp.Width; $h = $bmp.Height
+  for ($y = 0; $y -lt $h; $y += 3) {
+    for ($x = 0; $x -lt $w; $x += 3) {
+      $c = $bmp.GetPixel($x, $y)
+      $sum = $c.R + $c.G + $c.B
+      if ($c.B -gt $c.R + 15 -and $c.B -gt $c.G + 5 -and $c.R -lt 90 -and $sum -lt 420 -and $sum -gt 80) {
+        $r += $c.R; $g += $c.G; $b += $c.B; $n++
+      }
+    }
+  }
+  if ($n -eq 0) { return [System.Drawing.Color]::FromArgb(255, 39, 84, 142) }
+  [System.Drawing.Color]::FromArgb(255, [int]($r / $n), [int]($g / $n), [int]($b / $n))
+}
+
+function Test-OuterWhite([System.Drawing.Color]$c) {
+  # bianco esterno + anti-aliasing ai bordi arrotondati (non raggiunge la "i" interna)
+  $c.R -gt 245 -and $c.G -gt 245 -and $c.B -gt 245
+}
+
+function Remove-OuterWhite([System.Drawing.Bitmap]$bmp, [System.Drawing.Color]$bg) {
+  $w = $bmp.Width; $h = $bmp.Height
+  $seen = New-Object 'System.Collections.Generic.HashSet[int]'
+  $q = [System.Collections.Queue]::new()
+
+  function Enqueue([int]$x, [int]$y) {
+    if ($x -lt 0 -or $y -lt 0 -or $x -ge $w -or $y -ge $h) { return }
+    $k = $y * $w + $x
+    if ($seen.Contains($k)) { return }
+    if (-not (Test-OuterWhite ($bmp.GetPixel($x, $y)))) { return }
+    $seen.Add($k) | Out-Null
+    $q.Enqueue([System.Drawing.Point]::new($x, $y)) | Out-Null
+  }
+
+  for ($x = 0; $x -lt $w; $x++) { Enqueue $x 0; Enqueue $x ($h - 1) }
+  for ($y = 0; $y -lt $h; $y++) { Enqueue 0 $y; Enqueue ($w - 1) $y }
+
+  while ($q.Count -gt 0) {
+    $p = $q.Dequeue()
+    $bmp.SetPixel($p.X, $p.Y, $bg)
+    Enqueue ($p.X - 1) $p.Y
+    Enqueue ($p.X + 1) $p.Y
+    Enqueue $p.X ($p.Y - 1)
+    Enqueue $p.X ($p.Y + 1)
+  }
+}
+
+function Get-CenterSquareCrop([System.Drawing.Bitmap]$src) {
+  $size = [Math]::Min($src.Width, $src.Height)
+  $x = [int](($src.Width - $size) / 2)
+  $y = [int](($src.Height - $size) / 2)
   $bmp = New-Object System.Drawing.Bitmap $size, $size
   $g = [System.Drawing.Graphics]::FromImage($bmp)
   $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
-  $g.DrawImage($img, 0, 0, (New-Object System.Drawing.Rectangle $x, $y, $size, $size), [System.Drawing.GraphicsUnit]::Pixel)
+  $g.DrawImage($src, 0, 0, (New-Object System.Drawing.Rectangle $x, $y, $size, $size), [System.Drawing.GraphicsUnit]::Pixel)
   $g.Dispose()
   $bmp
 }
 
-function Get-EdgeBg([System.Drawing.Bitmap]$bmp) {
-  $pts = @(
-    [System.Drawing.Point]::new(0, 0),
-    [System.Drawing.Point]::new($bmp.Width - 1, 0),
-    [System.Drawing.Point]::new(0, $bmp.Height - 1),
-    [System.Drawing.Point]::new($bmp.Width - 1, $bmp.Height - 1),
-    [System.Drawing.Point]::new([int]($bmp.Width / 2), 0)
-  )
-  $r = 0; $g = 0; $b = 0
-  foreach ($p in $pts) {
-    $c = $bmp.GetPixel($p.X, $p.Y)
-    $r += $c.R; $g += $c.G; $b += $c.B
-  }
-  [System.Drawing.Color]::FromArgb(255, [int]($r / $pts.Count), [int]($g / $pts.Count), [int]($b / $pts.Count))
-}
-
-function Remove-BrightEdgePixels([System.Drawing.Bitmap]$bmp, [System.Drawing.Color]$bg, [int]$border) {
-  $w = $bmp.Width; $h = $bmp.Height
-  for ($y = 0; $y -lt $h; $y++) {
-    for ($x = 0; $x -lt $w; $x++) {
-      $onEdge = ($x -lt $border -or $y -lt $border -or $x -ge ($w - $border) -or $y -ge ($h - $border))
-      if (-not $onEdge) { continue }
-      $c = $bmp.GetPixel($x, $y)
-      if (($c.R + $c.G + $c.B) -gt 680 -or ($c.R -gt 230 -and $c.G -gt 230 -and $c.B -gt 230)) {
-        $bmp.SetPixel($x, $y, $bg)
-      }
-    }
-  }
-}
-
-function Save-Scaled([System.Drawing.Bitmap]$art, [System.Drawing.Color]$bg, [string]$outPath, [int]$size, [double]$scale) {
+function Save-Square([System.Drawing.Bitmap]$src, [string]$outPath, [int]$size) {
   $bmp = New-Object System.Drawing.Bitmap $size, $size
   $g = [System.Drawing.Graphics]::FromImage($bmp)
-  $g.Clear($bg)
   $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
-  $inner = [int]($size * $scale)
-  $x = [int](($size - $inner) / 2)
-  $y = [int](($size - $inner) / 2)
-  $g.DrawImage($art, $x, $y, $inner, $inner)
+  $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::HighQuality
+  $ratio = [Math]::Min($size / $src.Width, $size / $src.Height)
+  $dw = [int]($src.Width * $ratio)
+  $dh = [int]($src.Height * $ratio)
+  $dx = [int](($size - $dw) / 2)
+  $dy = [int](($size - $dh) / 2)
+  $g.DrawImage($src, $dx, $dy, $dw, $dh)
   $g.Dispose()
-  $border = [Math]::Max(6, [int]($size * 0.025))
-  Remove-BrightEdgePixels $bmp $bg $border
   $bmp.Save($outPath, [System.Drawing.Imaging.ImageFormat]::Png)
   $bmp.Dispose()
 }
 
-Write-Host "Ripristino icone standard dal backup..."
-Copy-Item (Join-Path $backupDir "icon_backup_$stamp.png") (Join-Path $iconsDir "icon.png") -Force
-Copy-Item (Join-Path $backupDir "icon-512_backup_$stamp.png") (Join-Path $iconsDir "icon-512.png") -Force
-Copy-Item (Join-Path $backupDir "icon-192_backup_$stamp.png") (Join-Path $iconsDir "icon-192.png") -Force
+if (-not (Test-Path $sourceAsset)) {
+  Write-Error "Asset sorgente non trovato: $sourceAsset"
+  exit 1
+}
 
-Write-Host "Generazione icone maskable full-bleed..."
-$loaded = [System.Drawing.Image]::FromFile($cleanAsset)
-$square = Get-SquareCrop $loaded
+Write-Host "Generazione icone (crop + flood-fill angoli, proporzioni preservate)..."
+$loaded = [System.Drawing.Image]::FromFile($sourceAsset)
+Write-Host "Sorgente: $($loaded.Width)x$($loaded.Height)"
+$square = Get-CenterSquareCrop $loaded
 $loaded.Dispose()
-$bg = Get-EdgeBg $square
-Write-Host "Background maskable: $($bg.R),$($bg.G),$($bg.B)"
 
-Save-Scaled $square $bg (Join-Path $iconsDir "icon-512-maskable.png") 512 0.90
-Save-Scaled $square $bg (Join-Path $iconsDir "icon-192-maskable.png") 192 0.90
+$bg = Get-IconBlue $square
+Write-Host "Blu sfondo: RGB($($bg.R),$($bg.G),$($bg.B))"
+Remove-OuterWhite $square $bg
+
+Save-Square $square (Join-Path $iconsDir "icon.png") 512
+Save-Square $square (Join-Path $iconsDir "icon-512.png") 512
+Save-Square $square (Join-Path $iconsDir "icon-192.png") 192
+Save-Square $square (Join-Path $iconsDir "icon-512-maskable.png") 512
+Save-Square $square (Join-Path $iconsDir "icon-192-maskable.png") 192
 $square.Dispose()
 Write-Host "Fatto."

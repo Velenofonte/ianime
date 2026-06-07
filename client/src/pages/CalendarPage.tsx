@@ -1,10 +1,18 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { api } from '../services/api';
-import { fetchAnimeByIds } from '../services/anilist';
-import { DAY_MAP } from '../types/anime';
+import { fetchAnimeByIds, matchesAiringDay } from '../services/anilist';
+import { WEEK_DAYS } from '../types/anime';
 
-const WEEK_DAYS = ['Lunedì', 'Martedì', 'Mercoledì', 'Giovedì', 'Venerdì', 'Sabato', 'Domenica'];
+function calendarTitle(anime: { franchiseTitle: string; title: string; seasonNumber: number | null }) {
+  if (anime.seasonNumber !== null) {
+    return `${anime.franchiseTitle} — S${anime.seasonNumber}`;
+  }
+  if (anime.title !== anime.franchiseTitle) {
+    return anime.franchiseTitle;
+  }
+  return anime.title;
+}
 
 export function CalendarPage() {
   const { data: ids = [] } = useQuery({
@@ -21,10 +29,7 @@ export function CalendarPage() {
   const airing = anime.filter((a) => a.status === 'RELEASING' && a.airingDay);
 
   const byDay = WEEK_DAYS.reduce<Record<string, typeof airing>>((acc, day) => {
-    acc[day] = airing.filter((a) => {
-      const normalized = Object.entries(DAY_MAP).find(([, v]) => v === day)?.[0];
-      return a.airingDay === day || a.airingDay === normalized;
-    });
+    acc[day] = airing.filter((a) => matchesAiringDay(a, day));
     return acc;
   }, {});
 
@@ -55,7 +60,7 @@ export function CalendarPage() {
                       <img src={a.coverImage} alt="" className="h-14 w-10 rounded object-cover" />
                     )}
                     <div>
-                      <p className="text-sm font-medium leading-tight">{a.title}</p>
+                      <p className="text-sm font-medium leading-tight">{calendarTitle(a)}</p>
                       {a.airingTime && <p className="text-xs text-gray-400">{a.airingTime}</p>}
                     </div>
                   </li>

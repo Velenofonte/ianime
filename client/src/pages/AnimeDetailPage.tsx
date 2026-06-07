@@ -3,7 +3,7 @@ import { Link, useParams } from 'react-router-dom';
 import { FavoriteButton } from '../components/FavoriteButton';
 import { PosterImage } from '../components/PosterImage';
 import { StarRating } from '../components/StarRating';
-import { fetchAnimeById } from '../services/anilist';
+import { fetchAnimeById, seasonStatusLabel } from '../services/anilist';
 
 function BackLink() {
   return (
@@ -38,6 +38,15 @@ function DetailSkeleton() {
       </div>
     </div>
   );
+}
+
+function seasonListLabel(season: { title: string; seasonNumber: number | null }, index: number): string {
+  if (season.seasonNumber !== null) {
+    const hasPart = /\bpart\s*\d+\b/i.test(season.title) || /\bcour\s*\d+\b/i.test(season.title);
+    if (hasPart) return season.title;
+    return `Stagione ${season.seasonNumber}`;
+  }
+  return index === 0 ? 'Stagione 1' : `Stagione ${index + 1}`;
 }
 
 export function AnimeDetailPage() {
@@ -90,6 +99,12 @@ export function AnimeDetailPage() {
   }
 
   const anime = query.data;
+  const seasonIds = anime.seasons.length ? anime.seasons.map((s) => s.id) : [anime.id];
+  const displaySeason =
+    anime.seasons.find((s) => s.id === animeId) ??
+    anime.seasons.find((s) => s.id === anime.canonicalSeasonId) ??
+    null;
+  const isAiring = anime.franchiseStatus === 'RELEASING';
 
   return (
     <div>
@@ -97,9 +112,9 @@ export function AnimeDetailPage() {
       <div className="grid gap-6 md:grid-cols-[280px_1fr] lg:grid-cols-[320px_1fr]">
         <div className="mx-auto w-full max-w-xs md:mx-0">
           <div className="overflow-hidden rounded-xl border border-white/5 bg-surface-card">
-            <PosterImage src={anime.coverImage} alt={anime.title}>
+            <PosterImage src={anime.coverImage} alt={anime.franchiseTitle}>
               <span className="absolute bottom-2 left-2 rounded bg-black/70 px-2 py-0.5 text-xs">
-                {anime.statusLabel}
+                {anime.franchiseStatusLabel}
               </span>
             </PosterImage>
           </div>
@@ -107,8 +122,8 @@ export function AnimeDetailPage() {
 
         <div className="space-y-4">
           <div className="flex items-start gap-3">
-            <h1 className="flex-1 text-2xl font-bold leading-tight">{anime.title}</h1>
-            <FavoriteButton anilistId={anime.id} inline />
+            <h1 className="flex-1 text-2xl font-bold leading-tight">{anime.franchiseTitle}</h1>
+            <FavoriteButton anilistId={anime.canonicalSeasonId} relatedIds={seasonIds} inline />
           </div>
 
           <StarRating score={anime.averageScore} size="md" />
@@ -124,16 +139,46 @@ export function AnimeDetailPage() {
           <p className="text-sm leading-relaxed text-gray-400">{anime.description}</p>
 
           <div className="grid grid-cols-2 gap-2 text-sm text-gray-400">
-            <span>Episodi: {anime.episodes ?? '?'}</span>
             <span>Stagioni: {anime.seasonCount}</span>
             <span>{anime.italianAudioLabel}</span>
-            {anime.airingDay && anime.status === 'RELEASING' && (
-              <span>
+            {displaySeason && (
+              <span className="col-span-2">
+                In visione: {displaySeason.title}
+              </span>
+            )}
+            {isAiring && anime.airingDay && (
+              <span className="col-span-2">
                 Uscita: {anime.airingDay}
                 {anime.airingTime ? ` ${anime.airingTime}` : ''}
               </span>
             )}
           </div>
+
+          {(anime.seasons.length > 1 || anime.seasonCount > 1) && (
+            <div>
+              <p className="mb-2 text-sm font-medium text-gray-300">Stagioni</p>
+              <ul className="space-y-2">
+                {anime.seasons.map((season, index) => {
+                  const isCurrent = season.id === animeId;
+                  return (
+                    <li key={season.id}>
+                      <Link
+                        to={`/anime/${season.id}`}
+                        className={`flex items-center justify-between rounded-lg border px-3 py-2 text-sm transition ${
+                          isCurrent
+                            ? 'border-accent/40 bg-accent/10 text-accent-light'
+                            : 'border-white/10 bg-surface-card text-gray-300 hover:border-accent/30'
+                        }`}
+                      >
+                        <span>{seasonListLabel(season, index)}</span>
+                        <span className="text-xs text-gray-400">{seasonStatusLabel(season.status)}</span>
+                      </Link>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
 
           {anime.italianPlatforms.length > 0 && (
             <div>

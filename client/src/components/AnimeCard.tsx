@@ -5,23 +5,26 @@ import { PosterImage } from './PosterImage';
 import { StarRating } from './StarRating';
 
 export function AnimeCard({ anime }: { anime: AnimeCardType }) {
+  const seasonIds = anime.seasons.length ? anime.seasons.map((s) => s.id) : [anime.id];
+  const isAiring = anime.franchiseStatus === 'RELEASING';
+
   return (
     <Link
-      to={`/anime/${anime.id}`}
+      to={`/anime/${anime.canonicalSeasonId}`}
       onClick={(e) => {
         if ((e.target as Element).closest('button')) e.preventDefault();
       }}
       className="group block overflow-hidden rounded-xl border border-white/5 bg-surface-card transition hover:border-accent/30 hover:shadow-lg hover:shadow-accent/5"
     >
-      <PosterImage src={anime.coverImage} alt={anime.title}>
+      <PosterImage src={anime.coverImage} alt={anime.franchiseTitle}>
         <span className="absolute bottom-2 left-2 rounded bg-black/70 px-2 py-0.5 text-xs">
-          {anime.statusLabel}
+          {anime.franchiseStatusLabel}
         </span>
       </PosterImage>
       <div className="space-y-2 p-4">
         <div className="flex items-start gap-2">
-          <h3 className="line-clamp-2 flex-1 font-semibold leading-tight">{anime.title}</h3>
-          <FavoriteButton anilistId={anime.id} inline />
+          <h3 className="line-clamp-2 flex-1 font-semibold leading-tight">{anime.franchiseTitle}</h3>
+          <FavoriteButton anilistId={anime.canonicalSeasonId} relatedIds={seasonIds} inline />
         </div>
         <StarRating score={anime.averageScore} />
         <div className="flex flex-wrap gap-1">
@@ -31,11 +34,12 @@ export function AnimeCard({ anime }: { anime: AnimeCardType }) {
         </div>
         <p className="line-clamp-3 text-xs text-gray-400">{anime.description}</p>
         <div className="grid grid-cols-2 gap-1 text-xs text-gray-400">
-          <span>Episodi: {anime.episodes ?? '?'}</span>
           <span>Stagioni: {anime.seasonCount}</span>
           <span>{anime.italianAudioLabel}</span>
-          {anime.airingDay && anime.status === 'RELEASING' && (
-            <span>Uscita: {anime.airingDay}{anime.airingTime ? ` ${anime.airingTime}` : ''}</span>
+          {isAiring && anime.airingDay && (
+            <span className="col-span-2">
+              Uscita: {anime.airingDay}{anime.airingTime ? ` ${anime.airingTime}` : ''}
+            </span>
           )}
         </div>
         {anime.italianPlatforms.length > 0 && (
