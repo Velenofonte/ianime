@@ -4,6 +4,8 @@ import { api } from '../services/api';
 import { fetchAnimeByIds, matchesAiringDay } from '../services/anilist';
 import { WEEK_DAYS } from '../types/anime';
 
+const ITALIAN_DAYS = ['Domenica', 'Lunedì', 'Martedì', 'Mercoledì', 'Giovedì', 'Venerdì', 'Sabato'] as const;
+
 function calendarTitle(anime: { franchiseTitle: string; title: string; seasonNumber: number | null }) {
   if (anime.seasonNumber !== null) {
     return `${anime.franchiseTitle} — S${anime.seasonNumber}`;
@@ -33,6 +35,8 @@ export function CalendarPage() {
     return acc;
   }, {});
 
+  const today = ITALIAN_DAYS[new Date().getDay()];
+
   if (!ids.length) {
     return (
       <div className="py-20 text-center">
@@ -50,7 +54,12 @@ export function CalendarPage() {
       <p className="mb-6 text-sm text-gray-400">Anime in corso nei preferiti, raggruppati per giorno di uscita.</p>
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         {WEEK_DAYS.map((day) => (
-          <div key={day} className="rounded-xl border border-white/10 bg-surface-card p-4">
+          <div
+            key={day}
+            className={`rounded-xl border bg-surface-card p-4 ${
+              day === today ? 'border-yellow-400' : 'border-white/10'
+            }`}
+          >
             <h2 className="mb-3 font-semibold text-accent-light">{day}</h2>
             {byDay[day]?.length ? (
               <ul className="space-y-3">

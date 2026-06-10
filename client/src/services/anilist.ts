@@ -642,7 +642,7 @@ export interface FetchAnimeParams {
 function resolveSort(releaseOrder: '' | 'recent' | 'oldest' | undefined): string[] {
   if (releaseOrder === 'recent') return ['START_DATE_DESC'];
   if (releaseOrder === 'oldest') return ['START_DATE'];
-  return ['POPULARITY_DESC'];
+  return ['TRENDING_DESC'];
 }
 
 export async function fetchTrendingAnime(params: FetchAnimeParams = {}): Promise<{ media: AnimeCard[]; hasNextPage: boolean }> {

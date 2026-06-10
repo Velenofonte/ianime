@@ -159,7 +159,7 @@ export function HomePage() {
   return (
     <div>
       <FilterBar />
-      <h1 className="mb-4 text-2xl font-bold">Anime popolari</h1>
+      <h1 className="mb-4 text-2xl font-bold">Anime in tendenza</h1>
       {query.isLoading && <SkeletonGrid />}
       {query.isError && (
         <div className="rounded-lg bg-red-500/10 p-4 text-red-400">
