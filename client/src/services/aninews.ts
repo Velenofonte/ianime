@@ -1,6 +1,18 @@
 import type { NewsArticle } from '../types/anime';
 
-const NEWS_URL = 'https://aninews.vercel.app/api/news';
+const NEWS_BASE = 'https://aninews.vercel.app';
+
+function mapArticle(a: Record<string, string>): NewsArticle {
+  return {
+    title: a.title,
+    slug: a.slug,
+    source: a.source,
+    excerpt: a.excerpt,
+    date: a.date,
+    image: a.image,
+    link: a.link,
+  };
+}
 
 export async function fetchNews(
   limit = 20,
@@ -9,20 +21,20 @@ export async function fetchNews(
 ): Promise<{ articles: NewsArticle[]; hasMore: boolean; nextCursor?: string }> {
   const params = new URLSearchParams({ limit: String(limit), source });
   if (cursor) params.set('cursor', cursor);
-  const res = await fetch(`${NEWS_URL}?${params}`);
+  const res = await fetch(`${NEWS_BASE}/api/news?${params}`);
   const json = await res.json();
-  const articles: NewsArticle[] = (json.data || []).map((a: Record<string, string>) => ({
-    title: a.title,
-    slug: a.slug,
-    source: a.source,
-    excerpt: a.excerpt,
-    date: a.date,
-    image: a.image,
-    link: a.link,
-  }));
   return {
-    articles,
+    articles: (json.data || []).map(mapArticle),
     hasMore: json.meta?.hasMore ?? false,
     nextCursor: json.meta?.nextCursor,
+  };
+}
+
+export async function searchNews(query: string, limit = 5): Promise<{ articles: NewsArticle[] }> {
+  const params = new URLSearchParams({ q: query, limit: String(limit) });
+  const res = await fetch(`${NEWS_BASE}/api/search?${params}`);
+  const json = await res.json();
+  return {
+    articles: (json.data || []).map(mapArticle),
   };
 }

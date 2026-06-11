@@ -85,7 +85,11 @@ export function HomePage() {
   }, [queryKey]);
 
   const needsMoreResults =
-    filters.minSeasons > 0 || !!filters.platform || filters.status === 'FINISHED' || !!filters.airingDay;
+    filters.minSeasons > 0 ||
+    !!filters.platform ||
+    filters.status === 'FINISHED' ||
+    filters.status === 'NOT_YET_RELEASED' ||
+    !!filters.airingDay;
 
   const allMedia = useMemo(() => {
     const raw = query.data?.pages.flatMap((p) => p.media) ?? [];

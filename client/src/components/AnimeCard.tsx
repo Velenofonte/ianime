@@ -1,5 +1,6 @@
 import type { AnimeCard as AnimeCardType } from '../types/anime';
 import { Link } from 'react-router-dom';
+import { formatStartDate } from '../services/anilist';
 import { FavoriteButton } from './FavoriteButton';
 import { PosterImage } from './PosterImage';
 import { StarRating } from './StarRating';
@@ -7,6 +8,10 @@ import { StarRating } from './StarRating';
 export function AnimeCard({ anime }: { anime: AnimeCardType }) {
   const seasonIds = anime.seasons.length ? anime.seasons.map((s) => s.id) : [anime.id];
   const isAiring = anime.franchiseStatus === 'RELEASING';
+  const isUpcoming = anime.franchiseStatus === 'NOT_YET_RELEASED';
+  const releaseDateLabel = isUpcoming
+    ? formatStartDate(anime.startDate, anime.season, anime.seasonYear)
+    : null;
 
   return (
     <Link
@@ -40,6 +45,9 @@ export function AnimeCard({ anime }: { anime: AnimeCardType }) {
             <span className="col-span-2">
               Uscita: {anime.airingDay}{anime.airingTime ? ` ${anime.airingTime}` : ''}
             </span>
+          )}
+          {releaseDateLabel && (
+            <span className="col-span-2">Uscita prevista: {releaseDateLabel}</span>
           )}
         </div>
         {anime.italianPlatforms.length > 0 && (

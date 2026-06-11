@@ -1,6 +1,8 @@
+import { format } from 'date-fns';
+import { it } from 'date-fns/locale';
 import DOMPurify from 'dompurify';
 import { starsToAnilistScore } from '../components/StarRating';
-import type { AnimeCard, AnimeStatus, FranchiseSeason, ItalianAudioStatus } from '../types/anime';
+import type { AnimeCard, AnimeStatus, FranchiseSeason, FuzzyDate, ItalianAudioStatus } from '../types/anime';
 import { DAY_MAP, EXCLUDED_GENRES, ITALIAN_PLATFORMS } from '../types/anime';
 import { fetchJikanBroadcast } from './jikan';
 
@@ -22,6 +24,8 @@ const MEDIA_FIELDS = `
   title { romaji english }
   coverImage { extraLarge }
   description genres episodes status format averageScore
+  startDate { year month day }
+  season seasonYear
   nextAiringEpisode { airingAt episode }
   externalLinks { site url language type }
   relations {
@@ -29,6 +33,8 @@ const MEDIA_FIELDS = `
       relationType
       node {
         id format status episodes
+        startDate { year month day }
+        season seasonYear
         title { romaji english }
         coverImage { extraLarge }
       }
@@ -252,6 +258,53 @@ export function seasonStatusLabel(status: AnimeStatus): string {
   return status;
 }
 
+const SEASON_LABELS: Record<string, string> = {
+  WINTER: 'Inverno',
+  SPRING: 'Primavera',
+  SUMMER: 'Estate',
+  FALL: 'Autunno',
+};
+
+function parseFuzzyDate(raw?: { year?: number | null; month?: number | null; day?: number | null } | null): FuzzyDate | null {
+  if (!raw) return null;
+  const year = raw.year && raw.year > 0 ? raw.year : null;
+  const month = raw.month && raw.month > 0 ? raw.month : null;
+  const day = raw.day && raw.day > 0 ? raw.day : null;
+  if (!year && !month && !day) return null;
+  return { year, month, day };
+}
+
+export function formatStartDate(
+  startDate: FuzzyDate | null,
+  season?: string | null,
+  seasonYear?: number | null
+): string | null {
+  if (startDate?.year && startDate.month && startDate.day) {
+    return format(new Date(startDate.year, startDate.month - 1, startDate.day), 'd MMMM yyyy', { locale: it });
+  }
+  if (startDate?.year && startDate.month) {
+    return format(new Date(startDate.year, startDate.month - 1, 1), 'MMMM yyyy', { locale: it });
+  }
+  if (startDate?.year) return String(startDate.year);
+  if (season && seasonYear) {
+    const label = SEASON_LABELS[season] ?? season;
+    return `${label} ${seasonYear}`;
+  }
+  return null;
+}
+
+function seasonDateFields(raw: {
+  startDate?: { year?: number | null; month?: number | null; day?: number | null } | null;
+  season?: string | null;
+  seasonYear?: number | null;
+}) {
+  return {
+    startDate: parseFuzzyDate(raw.startDate),
+    season: raw.season ?? null,
+    seasonYear: raw.seasonYear ?? null,
+  };
+}
+
 function italianAudioLabel(s: ItalianAudioStatus): string {
   if (s === 'dub') return 'Doppiato IT';
   if (s === 'sub') return 'Sottotitoli IT';
@@ -263,6 +316,9 @@ interface RawRelationNode {
   format: string;
   status: string;
   episodes: number | null;
+  startDate?: { year?: number | null; month?: number | null; day?: number | null } | null;
+  season?: string | null;
+  seasonYear?: number | null;
   title?: { romaji: string; english: string | null };
   coverImage?: { extraLarge: string };
 }
@@ -276,6 +332,9 @@ interface RawMedia {
   genres: string[];
   episodes: number | null;
   status: AnimeStatus;
+  startDate?: { year?: number | null; month?: number | null; day?: number | null } | null;
+  season?: string | null;
+  seasonYear?: number | null;
   averageScore: number | null;
   nextAiringEpisode: { airingAt: number } | null;
   externalLinks: { site: string; url: string; language: string | null; type: string }[];
@@ -304,6 +363,7 @@ function rawToFranchiseSeason(raw: RawMedia): FranchiseSeason {
     episodes: raw.episodes,
     seasonNumber: parsed.seasonNumber ?? (parsed.isSeasonEntry ? null : 1),
     coverImage: raw.coverImage?.extraLarge || '',
+    ...seasonDateFields(raw),
   };
 }
 
@@ -318,6 +378,7 @@ function seasonFromRelationNode(node: RawRelationNode): FranchiseSeason {
     episodes: node.episodes ?? null,
     seasonNumber: parsed.seasonNumber,
     coverImage: node.coverImage?.extraLarge || '',
+    ...seasonDateFields(node),
   };
 }
 
@@ -400,6 +461,7 @@ function buildFranchiseSeasons(raw: RawMedia): FranchiseSeason[] {
     episodes: raw.episodes,
     seasonNumber: parsedSelf.seasonNumber ?? (parsedSelf.isSeasonEntry ? null : 1),
     coverImage: raw.coverImage?.extraLarge || '',
+    ...seasonDateFields(raw),
   });
 
   for (const edge of raw.relations.edges) {
@@ -418,6 +480,7 @@ function buildFranchiseSeasons(raw: RawMedia): FranchiseSeason[] {
       episodes: node.episodes ?? null,
       seasonNumber: parsed.seasonNumber,
       coverImage: node.coverImage?.extraLarge || '',
+      ...seasonDateFields(node),
     });
   }
 
@@ -482,6 +545,9 @@ function deriveFranchiseFields(raw: RawMedia, seasonsOverride?: FranchiseSeason[
     seasonCount,
     canonicalSeasonId: canonical.id,
     canonicalCoverImage: canonical.coverImage || raw.coverImage?.extraLarge || '',
+    startDate: canonical.startDate,
+    season: canonical.season,
+    seasonYear: canonical.seasonYear,
   };
 }
 
@@ -554,6 +620,9 @@ function mergeFranchiseCards(cards: AnimeCard[]): AnimeCard {
     airingTime: airingCard.airingTime,
     status: airingCard.status,
     statusLabel: statusLabel(airingCard.status),
+    startDate: canonical.startDate,
+    season: canonical.season,
+    seasonYear: canonical.seasonYear,
   };
 }
 
@@ -627,6 +696,9 @@ export async function normalizeMedia(
     franchiseStatusLabel: franchise.franchiseStatusLabel,
     seasons: franchise.seasons,
     canonicalSeasonId: franchise.canonicalSeasonId,
+    startDate: franchise.startDate,
+    season: franchise.season,
+    seasonYear: franchise.seasonYear,
   };
 }
 
@@ -746,6 +818,7 @@ export function filterAnimeClientSide(
     if (filters.platform && !matchesPlatform(a.platforms, filters.platform)) return false;
     if (filters.status === 'FINISHED' && a.franchiseStatus !== 'FINISHED') return false;
     if (filters.status === 'RELEASING' && a.franchiseStatus !== 'RELEASING') return false;
+    if (filters.status === 'NOT_YET_RELEASED' && a.franchiseStatus !== 'NOT_YET_RELEASED') return false;
     if (filters.airingDay) {
       if (a.franchiseStatus !== 'RELEASING') return false;
       if (!matchesAiringDay(a, filters.airingDay)) return false;

@@ -1,9 +1,13 @@
 import { useQuery } from '@tanstack/react-query';
+import { format } from 'date-fns';
+import { it } from 'date-fns/locale';
 import { Link, useParams } from 'react-router-dom';
 import { FavoriteButton } from '../components/FavoriteButton';
 import { PosterImage } from '../components/PosterImage';
 import { StarRating } from '../components/StarRating';
-import { fetchAnimeById, seasonStatusLabel } from '../services/anilist';
+import { searchNews } from '../services/aninews';
+import { fetchAnimeById, formatStartDate, seasonStatusLabel } from '../services/anilist';
+import type { AnimeCard, FranchiseSeason } from '../types/anime';
 
 function BackLink() {
   return (
@@ -49,6 +53,18 @@ function seasonListLabel(season: { title: string; seasonNumber: number | null },
   return index === 0 ? 'Stagione 1' : `Stagione ${index + 1}`;
 }
 
+function isUpcomingAnime(anime: AnimeCard): boolean {
+  return (
+    anime.franchiseStatus === 'NOT_YET_RELEASED' ||
+    anime.seasons.some((s) => s.status === 'NOT_YET_RELEASED')
+  );
+}
+
+function upcomingDateSource(anime: AnimeCard, displaySeason: FranchiseSeason | null) {
+  if (displaySeason?.status === 'NOT_YET_RELEASED') return displaySeason;
+  return anime;
+}
+
 export function AnimeDetailPage() {
   const { id } = useParams<{ id: string }>();
   const animeId = Number(id);
@@ -58,6 +74,20 @@ export function AnimeDetailPage() {
     queryKey: ['anime', animeId],
     queryFn: () => fetchAnimeById(animeId),
     enabled: validId,
+  });
+
+  const anime = query.data;
+  const showNews = !!anime && isUpcomingAnime(anime);
+
+  const newsQuery = useQuery({
+    queryKey: ['news-search', anime?.franchiseTitle, anime?.title],
+    queryFn: async () => {
+      const primary = await searchNews(anime!.franchiseTitle);
+      if (primary.articles.length) return primary.articles;
+      return (await searchNews(anime!.title)).articles;
+    },
+    enabled: showNews,
+    staleTime: 900000,
   });
 
   if (!validId) {
@@ -89,7 +119,7 @@ export function AnimeDetailPage() {
     );
   }
 
-  if (!query.data) {
+  if (!anime) {
     return (
       <div>
         <BackLink />
@@ -98,13 +128,18 @@ export function AnimeDetailPage() {
     );
   }
 
-  const anime = query.data;
   const seasonIds = anime.seasons.length ? anime.seasons.map((s) => s.id) : [anime.id];
   const displaySeason =
     anime.seasons.find((s) => s.id === animeId) ??
     anime.seasons.find((s) => s.id === anime.canonicalSeasonId) ??
     null;
   const isAiring = anime.franchiseStatus === 'RELEASING';
+  const isUpcoming = isUpcomingAnime(anime);
+  const dateSource = upcomingDateSource(anime, displaySeason);
+  const releaseDateLabel = isUpcoming
+    ? formatStartDate(dateSource.startDate, dateSource.season, dateSource.seasonYear)
+    : null;
+  const relatedNews = newsQuery.data ?? [];
 
   return (
     <div>
@@ -152,6 +187,9 @@ export function AnimeDetailPage() {
                 {anime.airingTime ? ` ${anime.airingTime}` : ''}
               </span>
             )}
+            {releaseDateLabel && (
+              <span className="col-span-2">Uscita prevista: {releaseDateLabel}</span>
+            )}
           </div>
 
           {(anime.seasons.length > 1 || anime.seasonCount > 1) && (
@@ -198,6 +236,37 @@ export function AnimeDetailPage() {
 
           {anime.platforms.length > 0 && (
             <p className="text-sm text-gray-500">Streaming: {anime.platforms.join(', ')}</p>
+          )}
+
+          {relatedNews.length > 0 && (
+            <div>
+              <p className="mb-3 text-sm font-medium text-gray-300">News correlate</p>
+              <div className="space-y-3">
+                {relatedNews.map((article) => (
+                  <a
+                    key={article.slug}
+                    href={article.link}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex gap-3 rounded-xl border border-white/10 bg-surface-card p-3 transition hover:border-accent/30"
+                  >
+                    {article.image && (
+                      <img src={article.image} alt="" className="h-16 w-16 shrink-0 rounded-lg object-cover" />
+                    )}
+                    <div>
+                      <p className="text-xs text-accent-light">{article.source}</p>
+                      <h2 className="text-sm font-semibold leading-tight">{article.title}</h2>
+                      {article.excerpt && (
+                        <p className="mt-1 line-clamp-2 text-xs text-gray-400">{article.excerpt}</p>
+                      )}
+                      <p className="mt-1 text-xs text-gray-500">
+                        {format(new Date(article.date), "d MMMM yyyy 'alle' HH:mm", { locale: it })}
+                      </p>
+                    </div>
+                  </a>
+                ))}
+              </div>
+            </div>
           )}
         </div>
       </div>

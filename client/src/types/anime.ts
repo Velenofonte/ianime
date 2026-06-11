@@ -2,6 +2,12 @@ export type AnimeStatus = 'RELEASING' | 'FINISHED' | 'NOT_YET_RELEASED' | 'CANCE
 
 export type ItalianAudioStatus = 'dub' | 'sub' | 'unknown';
 
+export interface FuzzyDate {
+  year: number | null;
+  month: number | null;
+  day: number | null;
+}
+
 export interface FranchiseSeason {
   id: number;
   title: string;
@@ -9,6 +15,9 @@ export interface FranchiseSeason {
   episodes: number | null;
   seasonNumber: number | null;
   coverImage: string;
+  startDate: FuzzyDate | null;
+  season: string | null;
+  seasonYear: number | null;
 }
 
 export interface AnimeCard {
@@ -39,6 +48,9 @@ export interface AnimeCard {
   franchiseStatusLabel: string;
   seasons: FranchiseSeason[];
   canonicalSeasonId: number;
+  startDate: FuzzyDate | null;
+  season: string | null;
+  seasonYear: number | null;
 }
 
 export const WEEK_DAYS = [
@@ -96,6 +108,7 @@ export const PLATFORM_OPTIONS = [
 export const STATUS_OPTIONS = [
   { label: 'Tutti', value: '' },
   { label: 'In corso', value: 'RELEASING' },
+  { label: 'In arrivo', value: 'NOT_YET_RELEASED' },
   { label: 'Completo', value: 'FINISHED' },
 ];
 
