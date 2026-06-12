@@ -77,7 +77,6 @@ export function AnimeDetailPage() {
   });
 
   const anime = query.data;
-  const showNews = !!anime && isUpcomingAnime(anime);
 
   const newsQuery = useQuery({
     queryKey: ['news-search', anime?.franchiseTitle, anime?.title],
@@ -86,7 +85,7 @@ export function AnimeDetailPage() {
       if (primary.articles.length) return primary.articles;
       return (await searchNews(anime!.title)).articles;
     },
-    enabled: showNews,
+    enabled: !!anime,
     staleTime: 900000,
   });
 

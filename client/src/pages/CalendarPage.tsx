@@ -64,14 +64,19 @@ export function CalendarPage() {
             {byDay[day]?.length ? (
               <ul className="space-y-3">
                 {byDay[day].map((a) => (
-                  <li key={a.id} className="flex gap-3">
-                    {a.coverImage && (
-                      <img src={a.coverImage} alt="" className="h-14 w-10 rounded object-cover" />
-                    )}
-                    <div>
-                      <p className="text-sm font-medium leading-tight">{calendarTitle(a)}</p>
-                      {a.airingTime && <p className="text-xs text-gray-400">{a.airingTime}</p>}
-                    </div>
+                  <li key={a.id}>
+                    <Link
+                      to={`/anime/${a.canonicalSeasonId}`}
+                      className="flex gap-3 rounded-lg p-1 transition hover:bg-surface-hover"
+                    >
+                      {a.coverImage && (
+                        <img src={a.coverImage} alt="" className="h-14 w-10 rounded object-cover" />
+                      )}
+                      <div>
+                        <p className="text-sm font-medium leading-tight">{calendarTitle(a)}</p>
+                        {a.airingTime && <p className="text-xs text-gray-400">{a.airingTime}</p>}
+                      </div>
+                    </Link>
                   </li>
                 ))}
               </ul>
