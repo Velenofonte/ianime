@@ -402,6 +402,65 @@ const FRANCHISE_FETCH_DELAY_MS = 700;
 const ANILIST_BATCH_DELAY_MS = 700;
 const ANILIST_BATCH_SIZE = 50;
 
+const CALENDAR_ACTIVE_STATUSES: AnimeStatus[] = ['RELEASING', 'NOT_YET_RELEASED'];
+
+const CALENDAR_STATUS_FIELDS = `
+  id status
+  relations {
+    edges {
+      relationType
+      node { id format status }
+    }
+  }
+`;
+
+interface RawCalendarStatus {
+  id: number;
+  status: AnimeStatus;
+  relations: { edges: { relationType: string; node: { format: string; status: string } }[] };
+}
+
+function isCalendarRelevantRaw(raw: RawCalendarStatus): boolean {
+  if (CALENDAR_ACTIVE_STATUSES.includes(raw.status)) return true;
+  return raw.relations.edges.some(
+    (e) =>
+      (e.relationType === 'SEQUEL' || e.relationType === 'PREQUEL') &&
+      isTvSeasonFormat(e.node.format) &&
+      CALENDAR_ACTIVE_STATUSES.includes(e.node.status as AnimeStatus)
+  );
+}
+
+async function fetchMediaStatusBatch(ids: number[]): Promise<RawCalendarStatus[]> {
+  const uniqueIds = [...new Set(ids)];
+  const results: RawCalendarStatus[] = [];
+
+  for (let i = 0; i < uniqueIds.length; i += ANILIST_BATCH_SIZE) {
+    if (i > 0) await sleep(ANILIST_BATCH_DELAY_MS);
+
+    const chunk = uniqueIds.slice(i, i + ANILIST_BATCH_SIZE);
+    const data = await anilistQuery<{ Page: { media: (RawCalendarStatus | null)[] } }>(
+      `query ($ids: [Int]) { Page(perPage: 50) { media(id_in: $ids, type: ANIME) { ${CALENDAR_STATUS_FIELDS} } } }`,
+      { ids: chunk }
+    );
+
+    for (const raw of data.Page.media) {
+      if (raw) results.push(raw);
+    }
+  }
+
+  return results;
+}
+
+export async function fetchCalendarAnimeByIds(ids: number[]): Promise<AnimeCard[]> {
+  if (!ids.length) return [];
+
+  const statusEntries = await fetchMediaStatusBatch(ids);
+  const relevantIds = statusEntries.filter(isCalendarRelevantRaw).map((raw) => raw.id);
+  if (!relevantIds.length) return [];
+
+  return fetchAnimeByIds(relevantIds, { jikanOnlyIfStatus: ['RELEASING'] });
+}
+
 const rawMediaCache = new Map<number, Promise<RawMedia | null>>();
 
 async function fetchRawMediaById(id: number): Promise<RawMedia | null> {
@@ -1002,23 +1061,46 @@ export async function fetchRecommendationsPage(
 
 export async function fetchAnimeByIds(
   ids: number[],
-  options: { expandFranchise?: boolean; skipJikan?: boolean } = {}
+  options: { expandFranchise?: boolean; skipJikan?: boolean; jikanOnlyIfStatus?: AnimeStatus[] } = {}
 ): Promise<AnimeCard[]> {
   if (!ids.length) return [];
+
+  const needsJikan = (status: AnimeStatus, idMal: number | null): idMal is number => {
+    if (!idMal || options.skipJikan) return false;
+    if (!options.jikanOnlyIfStatus) return true;
+    return options.jikanOnlyIfStatus.includes(status);
+  };
 
   if (!options.expandFranchise && ids.length > 1) {
     try {
       const byId = await fetchRawMediaBatch(ids);
-      const results: AnimeCard[] = [];
+      const broadcasts = new Map<number, { day: string | null; time: string | null }>();
 
+      if (!options.skipJikan) {
+        const malIds = [...new Set(
+          ids
+            .map((id) => byId.get(id))
+            .filter((raw): raw is RawMedia => !!raw && needsJikan(raw.status, raw.idMal))
+            .map((raw) => raw.idMal!)
+        )];
+
+        for (let i = 0; i < malIds.length; i += 3) {
+          if (i > 0) await sleep(400);
+          const chunk = malIds.slice(i, i + 3);
+          const chunkResults = await Promise.all(chunk.map((malId) => fetchJikanBroadcast(malId)));
+          chunk.forEach((malId, idx) => {
+            const broadcast = chunkResults[idx];
+            if (broadcast) broadcasts.set(malId, broadcast);
+          });
+        }
+      }
+
+      const results: AnimeCard[] = [];
       for (const id of ids) {
         const raw = byId.get(id);
         if (!raw || isExcludedRawMedia(raw)) continue;
 
-        let broadcast;
-        if (!options.skipJikan && raw.idMal) {
-          broadcast = await fetchJikanBroadcast(raw.idMal);
-        }
+        const broadcast = raw.idMal ? broadcasts.get(raw.idMal) : undefined;
         results.push(await normalizeMedia(raw, broadcast));
       }
 
@@ -1048,7 +1130,7 @@ export async function fetchAnimeByIds(
       }
 
       let broadcast;
-      if (!options.skipJikan && raw.idMal) broadcast = await fetchJikanBroadcast(raw.idMal);
+      if (needsJikan(raw.status, raw.idMal)) broadcast = await fetchJikanBroadcast(raw.idMal);
       results.push(await normalizeMedia(raw, broadcast, fullSeasons));
     } catch {
       // salta voci non caricabili

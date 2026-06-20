@@ -16,6 +16,7 @@ export function FavoritesPage() {
     queryKey: ['favorites-anime', ids],
     queryFn: () => fetchAnimeByIds(ids),
     enabled: ids.length > 0,
+    staleTime: 10 * 60 * 1000,
   });
 
   const franchiseAnime = useMemo(() => collapseFranchises(anime), [anime]);
@@ -33,7 +34,10 @@ export function FavoritesPage() {
 
   return (
     <div>
-      <h1 className="mb-6 text-2xl font-bold">I tuoi preferiti</h1>
+      <h1 className="mb-6 flex items-baseline gap-1.5 text-2xl font-bold">
+        I tuoi preferiti
+        <span className="text-xs font-medium tabular-nums text-gray-400">({franchiseAnime.length})</span>
+      </h1>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         {franchiseAnime.map((a) => (
           <AnimeCard key={a.franchiseKey} anime={a} />

@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { api } from '../services/api';
-import { collectUpcomingSeasons, fetchAnimeByIds, matchesAiringDay } from '../services/anilist';
+import { collectUpcomingSeasons, fetchCalendarAnimeByIds, matchesAiringDay } from '../services/anilist';
 import { WEEK_DAYS } from '../types/anime';
 
 const ITALIAN_DAYS = ['Domenica', 'Lunedì', 'Martedì', 'Mercoledì', 'Giovedì', 'Venerdì', 'Sabato'] as const;
@@ -17,21 +17,24 @@ function calendarTitle(anime: { franchiseTitle: string; title: string; seasonNum
   return anime.title;
 }
 
+const FAVORITE_ANIME_STALE_MS = 10 * 60 * 1000;
+
 export function CalendarPage() {
-  const { data: ids = [] } = useQuery({
+  const { data: ids = [], isLoading: loadingIds } = useQuery({
     queryKey: ['favorites'],
     queryFn: async () => (await api.getFavorites()).anilist_ids,
   });
 
-  const { data: anime = [], isLoading } = useQuery({
+  const { data: anime = [], isLoading: loadingAnime } = useQuery({
     queryKey: ['calendar-anime', ids],
-    queryFn: () => fetchAnimeByIds(ids, { expandFranchise: true }),
+    queryFn: () => fetchCalendarAnimeByIds(ids),
     enabled: ids.length > 0,
+    staleTime: FAVORITE_ANIME_STALE_MS,
   });
 
   const upcoming = useMemo(() => collectUpcomingSeasons(anime), [anime]);
 
-  const airing = anime.filter((a) => a.status === 'RELEASING' && a.airingDay);
+  const airing = anime.filter((a) => a.franchiseStatus === 'RELEASING' && a.airingDay);
 
   const byDay = WEEK_DAYS.reduce<Record<string, typeof airing>>((acc, day) => {
     acc[day] = airing.filter((a) => matchesAiringDay(a, day));
@@ -39,6 +42,10 @@ export function CalendarPage() {
   }, {});
 
   const today = ITALIAN_DAYS[new Date().getDay()];
+
+  if (loadingIds || loadingAnime) {
+    return <div className="py-20 text-center text-gray-400">Caricamento calendario...</div>;
+  }
 
   if (!ids.length) {
     return (
@@ -50,8 +57,6 @@ export function CalendarPage() {
       </div>
     );
   }
-
-  if (isLoading) return <div className="py-20 text-center text-gray-400">Caricamento calendario...</div>;
 
   return (
     <div>
