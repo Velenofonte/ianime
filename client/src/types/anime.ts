@@ -20,6 +20,15 @@ export interface FranchiseSeason {
   seasonYear: number | null;
 }
 
+export interface UpcomingSeasonEntry {
+  franchiseTitle: string;
+  seasonLabel: string;
+  seasonId: number;
+  coverImage: string;
+  releaseLabel: string | null;
+  sortKey: number;
+}
+
 export interface AnimeCard {
   id: number;
   idMal: number | null;

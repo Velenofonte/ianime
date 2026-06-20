@@ -1,12 +1,14 @@
 import { Link, NavLink, Outlet } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { IconCalendar, IconHeart, IconHome, IconNews } from './NavIcons';
+import { APP_VERSION } from '../version';
+import { IconCalendar, IconHeart, IconHome, IconNews, IconSparkle } from './NavIcons';
 import { OfflineBanner } from './OfflineBanner';
 import { InstallPrompt } from './InstallPrompt';
 
 const NAV_ITEMS: { to: string; end?: boolean; label: string; Icon: typeof IconHome }[] = [
   { to: '/', end: true, label: 'Home', Icon: IconHome },
   { to: '/preferiti', label: 'Preferiti', Icon: IconHeart },
+  { to: '/suggerimenti', label: 'Suggerimenti', Icon: IconSparkle },
   { to: '/calendario', label: 'Calendario', Icon: IconCalendar },
   { to: '/news', label: 'News', Icon: IconNews },
 ];
@@ -32,7 +34,10 @@ export function Layout() {
         <div className="mx-auto flex h-full max-w-7xl items-center justify-between gap-4 px-4">
           <Link to="/" className="flex shrink-0 items-center gap-2.5">
             <img src="/icons/icon.png" alt="" className="h-12 w-12 shrink-0 rounded-lg object-contain shadow-md shadow-accent/20" />
-            <span className="text-lg font-bold tracking-tight text-accent-light">iAnime</span>
+            <span className="flex items-baseline gap-1.5">
+              <span className="text-lg font-bold tracking-tight text-accent-light">iAnime</span>
+              <span className="text-[10px] font-medium tabular-nums text-gray-500">{APP_VERSION}</span>
+            </span>
           </Link>
           <nav className="hidden items-center gap-1 md:flex">
             {NAV_ITEMS.map(({ to, end, label, Icon }) => (

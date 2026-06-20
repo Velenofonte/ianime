@@ -1,7 +1,8 @@
+import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { api } from '../services/api';
-import { fetchAnimeByIds, matchesAiringDay } from '../services/anilist';
+import { collectUpcomingSeasons, fetchAnimeByIds, matchesAiringDay } from '../services/anilist';
 import { WEEK_DAYS } from '../types/anime';
 
 const ITALIAN_DAYS = ['Domenica', 'Lunedì', 'Martedì', 'Mercoledì', 'Giovedì', 'Venerdì', 'Sabato'] as const;
@@ -24,9 +25,11 @@ export function CalendarPage() {
 
   const { data: anime = [], isLoading } = useQuery({
     queryKey: ['calendar-anime', ids],
-    queryFn: () => fetchAnimeByIds(ids),
+    queryFn: () => fetchAnimeByIds(ids, { expandFranchise: true }),
     enabled: ids.length > 0,
   });
+
+  const upcoming = useMemo(() => collectUpcomingSeasons(anime), [anime]);
 
   const airing = anime.filter((a) => a.status === 'RELEASING' && a.airingDay);
 
@@ -41,7 +44,9 @@ export function CalendarPage() {
     return (
       <div className="py-20 text-center">
         <p className="mb-4 text-gray-400">Aggiungi anime in corso ai preferiti per vedere il calendario.</p>
-        <Link to="/" className="text-accent-light hover:underline">Esplora anime →</Link>
+        <Link to="/" className="text-accent-light hover:underline">
+          Esplora anime →
+        </Link>
       </div>
     );
   }
@@ -51,6 +56,7 @@ export function CalendarPage() {
   return (
     <div>
       <h1 className="mb-6 text-2xl font-bold">Calendario uscite</h1>
+
       <p className="mb-6 text-sm text-gray-400">Anime in corso nei preferiti, raggruppati per giorno di uscita.</p>
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         {WEEK_DAYS.map((day) => (
@@ -86,6 +92,41 @@ export function CalendarPage() {
           </div>
         ))}
       </div>
+
+      <hr className="my-10 border-white/10" />
+
+      <section>
+        <h2 className="mb-1 text-lg font-semibold">In arrivo nei preferiti</h2>
+        <p className="mb-4 text-sm text-gray-400">Stagioni future ordinate per data di uscita</p>
+
+        {upcoming.length ? (
+          <ul className="space-y-3">
+            {upcoming.map((entry) => (
+              <li key={entry.seasonId}>
+                <Link
+                  to={`/anime/${entry.seasonId}`}
+                  className="flex gap-4 rounded-xl border border-white/10 bg-surface-card p-3 transition hover:border-accent/30 hover:bg-surface-hover"
+                >
+                  {entry.coverImage && (
+                    <img src={entry.coverImage} alt="" className="h-20 w-14 shrink-0 rounded-lg object-cover" />
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <p className="font-medium leading-tight">{entry.franchiseTitle}</p>
+                    <p className="text-sm text-accent-light">{entry.seasonLabel}</p>
+                    <p className="mt-1 text-sm text-gray-400">
+                      {entry.releaseLabel ?? 'Data da annunciare'}
+                    </p>
+                  </div>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="rounded-lg border border-white/5 bg-surface-card px-4 py-3 text-sm text-gray-500">
+            Nessuna stagione in arrivo tra i preferiti
+          </p>
+        )}
+      </section>
     </div>
   );
 }

@@ -2,7 +2,14 @@ import { format } from 'date-fns';
 import { it } from 'date-fns/locale';
 import DOMPurify from 'dompurify';
 import { starsToAnilistScore } from '../components/StarRating';
-import type { AnimeCard, AnimeStatus, FranchiseSeason, FuzzyDate, ItalianAudioStatus } from '../types/anime';
+import type {
+  AnimeCard,
+  AnimeStatus,
+  FranchiseSeason,
+  FuzzyDate,
+  ItalianAudioStatus,
+  UpcomingSeasonEntry,
+} from '../types/anime';
 import { DAY_MAP, EXCLUDED_GENRES, ITALIAN_PLATFORMS } from '../types/anime';
 import { fetchJikanBroadcast } from './jikan';
 
@@ -392,6 +399,8 @@ function collectTvSeasonEdges(raw: RawMedia) {
 
 const MAX_FRANCHISE_FETCHES = 8;
 const FRANCHISE_FETCH_DELAY_MS = 700;
+const ANILIST_BATCH_DELAY_MS = 700;
+const ANILIST_BATCH_SIZE = 50;
 
 const rawMediaCache = new Map<number, Promise<RawMedia | null>>();
 
@@ -405,6 +414,27 @@ async function fetchRawMediaById(id: number): Promise<RawMedia | null> {
     rawMediaCache.set(id, pending);
   }
   return pending;
+}
+
+async function fetchRawMediaBatch(ids: number[]): Promise<Map<number, RawMedia>> {
+  const uniqueIds = [...new Set(ids)];
+  const byId = new Map<number, RawMedia>();
+
+  for (let i = 0; i < uniqueIds.length; i += ANILIST_BATCH_SIZE) {
+    if (i > 0) await sleep(ANILIST_BATCH_DELAY_MS);
+
+    const chunk = uniqueIds.slice(i, i + ANILIST_BATCH_SIZE);
+    const data = await anilistQuery<{ Page: { media: (RawMedia | null)[] } }>(
+      `query ($ids: [Int]) { Page(perPage: 50) { media(id_in: $ids, type: ANIME) { ${MEDIA_FIELDS} } } }`,
+      { ids: chunk }
+    );
+
+    for (const raw of data.Page.media) {
+      if (raw) byId.set(raw.id, raw);
+    }
+  }
+
+  return byId;
 }
 
 async function fetchFullFranchiseSeasons(startRaw: RawMedia): Promise<FranchiseSeason[]> {
@@ -780,16 +810,246 @@ export async function fetchAnimeById(id: number): Promise<AnimeCard | null> {
   return normalizeMedia(raw, broadcast, fullSeasons);
 }
 
-export async function fetchAnimeByIds(ids: number[]): Promise<AnimeCard[]> {
+const RECOMMENDATION_SOURCE_MAX = 50;
+const RECOMMENDATION_PER_PAGE = 25;
+
+const SEASON_MONTH: Record<string, number> = {
+  WINTER: 0,
+  SPRING: 3,
+  SUMMER: 6,
+  FALL: 9,
+};
+
+export function fuzzyDateSortKey(
+  startDate: FuzzyDate | null,
+  season?: string | null,
+  seasonYear?: number | null
+): number {
+  if (startDate?.year && startDate.month && startDate.day) {
+    return new Date(startDate.year, startDate.month - 1, startDate.day).getTime();
+  }
+  if (startDate?.year && startDate.month) {
+    return new Date(startDate.year, startDate.month - 1, 1).getTime();
+  }
+  if (startDate?.year) {
+    return new Date(startDate.year, 0, 1).getTime();
+  }
+  if (season && seasonYear) {
+    const month = SEASON_MONTH[season] ?? 0;
+    return new Date(seasonYear, month, 1).getTime();
+  }
+  return Number.MAX_SAFE_INTEGER;
+}
+
+export function collectUpcomingSeasons(cards: AnimeCard[]): UpcomingSeasonEntry[] {
+  const collapsed = collapseFranchises(cards);
+  const entries: UpcomingSeasonEntry[] = [];
+  const seen = new Set<number>();
+
+  for (const card of collapsed) {
+    for (const season of card.seasons) {
+      if (season.status !== 'NOT_YET_RELEASED') continue;
+      if (seen.has(season.id)) continue;
+      seen.add(season.id);
+
+      const seasonLabel =
+        season.seasonNumber !== null
+          ? `S${season.seasonNumber}`
+          : season.title !== card.franchiseTitle
+            ? season.title
+            : 'Nuova stagione';
+
+      entries.push({
+        franchiseTitle: card.franchiseTitle,
+        seasonLabel,
+        seasonId: season.id,
+        coverImage: season.coverImage || card.coverImage,
+        releaseLabel: formatStartDate(season.startDate, season.season, season.seasonYear),
+        sortKey: fuzzyDateSortKey(season.startDate, season.season, season.seasonYear),
+      });
+    }
+  }
+
+  return entries.sort((a, b) => a.sortKey - b.sortKey);
+}
+
+interface RawRecommendationEdge {
+  node: {
+    rating: number | null;
+    mediaRecommendation: {
+      id: number;
+      format: string;
+      genres: string[];
+    } | null;
+  };
+}
+
+export interface RecommendationsPageResult {
+  media: AnimeCard[];
+  hasNextPage: boolean;
+}
+
+interface FavoriteExclusions {
+  excludedIds: Set<number>;
+  excludedSlugs: Set<string>;
+}
+
+const favoriteExclusionCache = new Map<string, FavoriteExclusions>();
+
+async function loadFavoriteExclusions(favoriteIds: number[]): Promise<FavoriteExclusions> {
+  const key = [...favoriteIds].sort((a, b) => a - b).join(',');
+  const cached = favoriteExclusionCache.get(key);
+  if (cached) return cached;
+
+  const cards = collapseFranchises(await fetchAnimeByIds(favoriteIds, { skipJikan: true }));
+  const excludedIds = new Set<number>(favoriteIds);
+  const excludedSlugs = new Set<string>();
+
+  for (const card of cards) {
+    excludedSlugs.add(card.titleSlug);
+    for (const id of seasonIdsForCard(card)) {
+      excludedIds.add(id);
+    }
+  }
+
+  const result = { excludedIds, excludedSlugs };
+  favoriteExclusionCache.set(key, result);
+  return result;
+}
+
+function isExcludedFromSuggestions(card: AnimeCard, exclusions: FavoriteExclusions): boolean {
+  if (exclusions.excludedSlugs.has(card.titleSlug)) return true;
+  return seasonIdsForCard(card).some((id) => exclusions.excludedIds.has(id));
+}
+
+export async function fetchRecommendationsPage(
+  favoriteIds: number[],
+  recPage: number
+): Promise<RecommendationsPageResult> {
+  if (!favoriteIds.length) return { media: [], hasNextPage: false };
+
+  const sourceIds = favoriteIds.slice(0, RECOMMENDATION_SOURCE_MAX);
+  const exclusions = await loadFavoriteExclusions(favoriteIds);
+
+  const query = `
+    query ($ids: [Int], $recPage: Int) {
+      Page(perPage: 50) {
+        media(id_in: $ids, type: ANIME) {
+          id
+          recommendations(page: $recPage, perPage: ${RECOMMENDATION_PER_PAGE}, sort: RATING_DESC) {
+            pageInfo { hasNextPage }
+            edges {
+              node {
+                rating
+                mediaRecommendation {
+                  id
+                  format
+                  genres
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  `;
+
+  const data = await anilistQuery<{
+    Page: {
+      media: {
+        id: number;
+        recommendations: {
+          pageInfo: { hasNextPage: boolean };
+          edges: RawRecommendationEdge[];
+        };
+      }[];
+    };
+  }>(query, { ids: sourceIds, recPage });
+
+  const scores = new Map<number, number>();
+  let hasNextPage = false;
+
+  for (const media of data.Page.media) {
+    if (media.recommendations.pageInfo?.hasNextPage) hasNextPage = true;
+
+    for (const edge of media.recommendations.edges) {
+      const rec = edge.node.mediaRecommendation;
+      if (!rec) continue;
+      if (!isTvSeasonFormat(rec.format)) continue;
+      if (isExcludedRawMedia(rec)) continue;
+      if (exclusions.excludedIds.has(rec.id)) continue;
+
+      const rating = edge.node.rating ?? 0;
+      scores.set(rec.id, (scores.get(rec.id) ?? 0) + rating);
+    }
+  }
+
+  const rankedIds = [...scores.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([id]) => id);
+
+  if (!rankedIds.length) {
+    return { media: [], hasNextPage };
+  }
+
+  if (recPage > 1) await sleep(ANILIST_BATCH_DELAY_MS);
+
+  const cards = collapseFranchises(
+    await fetchAnimeByIds(rankedIds, { skipJikan: true })
+  ).filter((card) => !isExcludedFromSuggestions(card, exclusions));
+  return { media: cards, hasNextPage };
+}
+
+export async function fetchAnimeByIds(
+  ids: number[],
+  options: { expandFranchise?: boolean; skipJikan?: boolean } = {}
+): Promise<AnimeCard[]> {
   if (!ids.length) return [];
-  const results: AnimeCard[] = [];
-  for (const id of ids) {
+
+  if (!options.expandFranchise && ids.length > 1) {
     try {
+      const byId = await fetchRawMediaBatch(ids);
+      const results: AnimeCard[] = [];
+
+      for (const id of ids) {
+        const raw = byId.get(id);
+        if (!raw || isExcludedRawMedia(raw)) continue;
+
+        let broadcast;
+        if (!options.skipJikan && raw.idMal) {
+          broadcast = await fetchJikanBroadcast(raw.idMal);
+        }
+        results.push(await normalizeMedia(raw, broadcast));
+      }
+
+      return results;
+    } catch {
+      // fallback sequenziale sotto
+    }
+  }
+
+  const results: AnimeCard[] = [];
+  for (let i = 0; i < ids.length; i++) {
+    const id = ids[i];
+    try {
+      if (i > 0) {
+        await sleep(options.expandFranchise ? FRANCHISE_FETCH_DELAY_MS : ANILIST_BATCH_DELAY_MS);
+      }
       const raw = await fetchRawMediaById(id);
       if (!raw) continue;
+
+      let fullSeasons: FranchiseSeason[] | undefined;
+      if (options.expandFranchise) {
+        try {
+          fullSeasons = await fetchFullFranchiseSeasons(raw);
+        } catch {
+          fullSeasons = buildFranchiseSeasons(raw);
+        }
+      }
+
       let broadcast;
-      if (raw.idMal) broadcast = await fetchJikanBroadcast(raw.idMal);
-      results.push(await normalizeMedia(raw, broadcast));
+      if (!options.skipJikan && raw.idMal) broadcast = await fetchJikanBroadcast(raw.idMal);
+      results.push(await normalizeMedia(raw, broadcast, fullSeasons));
     } catch {
       // salta voci non caricabili
     }

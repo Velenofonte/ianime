@@ -10,6 +10,7 @@ import { AccountPage } from './pages/AccountPage';
 import { AnimeDetailPage } from './pages/AnimeDetailPage';
 import { HomePage } from './pages/HomePage';
 import { NewsPage } from './pages/NewsPage';
+import { SuggestionsPage } from './pages/SuggestionsPage';
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: false } },
@@ -40,6 +41,14 @@ export default function App() {
                 element={
                   <ProtectedRoute>
                     <FavoritesPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="suggerimenti"
+                element={
+                  <ProtectedRoute>
+                    <SuggestionsPage />
                   </ProtectedRoute>
                 }
               />
