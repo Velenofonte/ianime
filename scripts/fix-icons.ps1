@@ -4,7 +4,7 @@
 Add-Type -AssemblyName System.Drawing
 
 $iconsDir = Join-Path $PSScriptRoot "..\client\public\icons" | Resolve-Path
-$sourceAsset = Join-Path $iconsDir "source\ianime-logo-approved2.png"
+$sourceAsset = Join-Path $iconsDir "source\ianime-logo-approved3.png"
 
 # Margine attorno al logo nel master quadrato (~3.5% del lato)
 $contentPaddingRatio = 0.035
