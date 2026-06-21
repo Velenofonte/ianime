@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../services/api';
 import { collapseFranchises, fetchAnimeById, fetchAnimeByIds } from '../services/anilist';
@@ -29,6 +29,7 @@ export function prefetchFavoritesAnime(qc: ReturnType<typeof useQueryClient>, id
 export function useFavorites() {
   const { user } = useAuth();
   const qc = useQueryClient();
+  const prevUserIdRef = useRef<string | null>(null);
 
   const { data: ids = [], isLoading } = useQuery({
     queryKey: FAVORITES_QUERY_KEY,
@@ -38,11 +39,20 @@ export function useFavorites() {
   });
 
   useEffect(() => {
-    if (!user) {
-      qc.setQueryData(FAVORITES_QUERY_KEY, []);
-      qc.setQueryData(FAVORITES_ANIME_QUERY_KEY, []);
+    const userId = user?.id ?? null;
+    const prevUserId = prevUserIdRef.current;
+
+    if (userId && userId !== prevUserId) {
+      void qc.invalidateQueries({ queryKey: FAVORITES_QUERY_KEY });
     }
-  }, [user, qc]);
+
+    if (prevUserId && !userId) {
+      qc.removeQueries({ queryKey: FAVORITES_QUERY_KEY });
+      qc.removeQueries({ queryKey: FAVORITES_ANIME_QUERY_KEY });
+    }
+
+    prevUserIdRef.current = userId;
+  }, [user?.id, qc]);
 
   useEffect(() => {
     if (!user || !ids.length) return;
