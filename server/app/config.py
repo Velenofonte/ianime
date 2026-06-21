@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     default_seed_password: str = ""
     seed_default_user: bool = True
     allow_registration: bool = False
+    libretranslate_url: str = "https://translate.fedilab.app"
+    libretranslate_api_key: str = ""
 
 
 settings = Settings()

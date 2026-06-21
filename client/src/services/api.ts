@@ -48,4 +48,9 @@ export const api = {
     request(`/favorites/${anilistId}`, { method: 'POST' }),
   removeFavorite: (anilistId: number) =>
     request(`/favorites/${anilistId}`, { method: 'DELETE' }),
+  translateDescription: (anilistId: number, text: string) =>
+    request<{ translated: string }>('/descriptions/translate', {
+      method: 'POST',
+      body: JSON.stringify({ anilist_id: anilistId, text }),
+    }),
 };

@@ -23,8 +23,22 @@ export default function App() {
         <BrowserRouter>
           <Routes>
             <Route element={<Layout />}>
-              <Route index element={<HomePage />} />
-              <Route path="anime/:id" element={<AnimeDetailPage />} />
+              <Route
+                index
+                element={
+                  <ProtectedRoute>
+                    <HomePage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="anime/:id"
+                element={
+                  <ProtectedRoute>
+                    <AnimeDetailPage />
+                  </ProtectedRoute>
+                }
+              />
               <Route path="news" element={<NewsPage />} />
               <Route path="login" element={<LoginPage />} />
               <Route path="register" element={<Navigate to="/login" replace />} />

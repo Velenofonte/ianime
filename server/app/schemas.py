@@ -30,3 +30,12 @@ class ChangePasswordRequest(BaseModel):
 
 class FavoritesResponse(BaseModel):
     anilist_ids: list[int]
+
+
+class TranslateDescriptionRequest(BaseModel):
+    anilist_id: int = Field(gt=0)
+    text: str = Field(min_length=1, max_length=8000)
+
+
+class TranslateDescriptionResponse(BaseModel):
+    translated: str

@@ -3,6 +3,7 @@ import { format } from 'date-fns';
 import { it } from 'date-fns/locale';
 import { Link, useParams } from 'react-router-dom';
 import { FavoriteButton } from '../components/FavoriteButton';
+import { AnimeDescription } from '../components/AnimeDescription';
 import { PosterImage } from '../components/PosterImage';
 import { StarRating } from '../components/StarRating';
 import { searchNews } from '../services/aninews';
@@ -170,7 +171,7 @@ export function AnimeDetailPage() {
             ))}
           </div>
 
-          <p className="text-sm leading-relaxed text-gray-400">{anime.description}</p>
+          <AnimeDescription anilistId={animeId} descriptionEn={anime.description} />
 
           <div className="grid grid-cols-2 gap-2 text-sm text-gray-400">
             <span>Stagioni: {anime.seasonCount}</span>

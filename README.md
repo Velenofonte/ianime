@@ -17,7 +17,7 @@ PWA web per tenere traccia degli anime preferiti, consultare il calendario delle
 - Pannello filtri nascosto di default, espandibile con un tap
 - Preferiti sincronizzati su account
 - Calendario settimanale uscite (preferiti in corso)
-- Dettaglio anime con descrizione completa
+- Dettaglio anime con descrizione completa e toggle EN/IT (traduzione on-demand)
 - News aggregate da varie fonti
 - Account con cambio password
 - PWA installabile con icona personalizzata (poster + «i» con calendario stilizzato)
@@ -115,6 +115,17 @@ Il manifest è generato da `vite-plugin-pwa` in `client/vite.config.ts`. Dopo un
 | `ALLOW_REGISTRATION` | `false` in produzione (registrazione disabilitata) |
 | `CLIENT_URL` | URL frontend (CORS dev) |
 | `VITE_API_URL` | `/api` in produzione |
+| `LIBRETRANSLATE_URL` | Mirror LibreTranslate (default `https://translate.fedilab.app`) |
+| `LIBRETRANSLATE_API_KEY` | Opzionale, solo se il mirror lo richiede |
+
+### Traduzione descrizioni (dettaglio anime)
+
+- Default: testo originale AniList (inglese)
+- Toggle **IT**: traduzione via LibreTranslate (mirror pubblico, nessuna registrazione)
+- Cache client 7 giorni (`localStorage` + React Query)
+- Endpoint `/api/descriptions/translate` protetto da JWT; home e dettaglio richiedono login
+
+Mirror alternativi se il default è offline: `https://translate.cutie.dating`, `https://libretranslate.de`
 
 ## Limiti Gigalixir free
 
