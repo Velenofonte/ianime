@@ -101,22 +101,70 @@ function Test-ContentPixel([System.Drawing.Color]$c, [System.Drawing.Color]$bg, 
   (Test-LeftEdgePixel $c) -or (Test-RightEdgePixel $c)
 }
 
+# Spostamento extra verso destra oltre alla centratura automatica
+$pwaShiftExtra = 10
+
+function Test-NearWhite([System.Drawing.Color]$c) {
+  $c.R -gt 230 -and $c.G -gt 230 -and $c.B -gt 230
+}
+
+function Remove-OuterLight([System.Drawing.Bitmap]$bmp, [System.Drawing.Color]$bg) {
+  $w = $bmp.Width; $h = $bmp.Height
+  $seen = New-Object 'System.Collections.Generic.HashSet[int]'
+  $q = [System.Collections.Queue]::new()
+
+  function EnqueueLight([int]$x, [int]$y) {
+    if ($x -lt 0 -or $y -lt 0 -or $x -ge $w -or $y -ge $h) { return }
+    $k = $y * $w + $x
+    if ($seen.Contains($k)) { return }
+    $c = $bmp.GetPixel($x, $y)
+    if (-not ((Test-OuterWhite $c) -or (Test-NearWhite $c))) { return }
+    $seen.Add($k) | Out-Null
+    $q.Enqueue([System.Drawing.Point]::new($x, $y)) | Out-Null
+  }
+
+  for ($x = 0; $x -lt $w; $x++) { EnqueueLight $x 0; EnqueueLight $x ($h - 1) }
+  for ($y = 0; $y -lt $h; $y++) { EnqueueLight 0 $y; EnqueueLight ($w - 1) $y }
+
+  while ($q.Count -gt 0) {
+    $p = $q.Dequeue()
+    $bmp.SetPixel($p.X, $p.Y, $bg)
+    EnqueueLight ($p.X - 1) $p.Y
+    EnqueueLight ($p.X + 1) $p.Y
+    EnqueueLight $p.X ($p.Y - 1)
+    EnqueueLight $p.X ($p.Y + 1)
+  }
+}
+
+function Shift-Horizontal([System.Drawing.Bitmap]$src, [int]$shift, [System.Drawing.Color]$bg) {
+  $w = $src.Width; $h = $src.Height
+  $bmp = New-Object System.Drawing.Bitmap $w, $h
+  for ($y = 0; $y -lt $h; $y++) {
+    for ($x = 0; $x -lt $w; $x++) {
+      $srcX = $x - $shift
+      if ($srcX -lt 0 -or $srcX -ge $w) {
+        $bmp.SetPixel($x, $y, $bg)
+      } else {
+        $bmp.SetPixel($x, $y, $src.GetPixel($srcX, $y))
+      }
+    }
+  }
+  $bmp
+}
+
 function Center-ContentHorizontally([System.Drawing.Bitmap]$src, [System.Drawing.Color]$bg) {
   $bounds = Get-ContentBounds $src $bg
   if ($null -eq $bounds) { return $src }
 
   $leftMargin = $bounds.MinX
   $rightMargin = ($src.Width - 1) - $bounds.MaxX
-  $shift = [int][Math]::Round(($rightMargin - $leftMargin) / 2.0)
-  if ($shift -eq 0) { return $src }
+  $shift = [int][Math]::Round(($rightMargin - $leftMargin) / 2.0) + $pwaShiftExtra
+  if ($shift -le 0) { return $src }
 
-  Write-Host "Centratura orizzontale: shift ${shift}px (contenuto $($bounds.MinX)-$($bounds.MaxX))"
-  $bmp = New-Object System.Drawing.Bitmap $src.Width, $src.Height
-  $g = [System.Drawing.Graphics]::FromImage($bmp)
-  $g.Clear($bg)
-  $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
-  $g.DrawImage($src, $shift, 0)
-  $g.Dispose()
+  Write-Host "Centratura orizzontale: shift ${shift}px (auto $([int][Math]::Round(($rightMargin - $leftMargin) / 2.0)) + extra $pwaShiftExtra, contenuto $($bounds.MinX)-$($bounds.MaxX))"
+  $bmp = Shift-Horizontal $src $shift $bg
+  Remove-OuterWhite $bmp $bg
+  Remove-OuterLight $bmp $bg
   $bmp
 }
 
