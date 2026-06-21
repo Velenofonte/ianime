@@ -9,7 +9,7 @@ $sourceAsset = Join-Path $iconsDir "source\ianime-logo-approved2.png"
 # Margine attorno al logo nel master quadrato (~3.5% del lato)
 $contentPaddingRatio = 0.035
 # Maskable: leggero inset per le maschere OS (il master e gia ritagliato stretto)
-$maskableScale = 0.90
+$maskableScale = 0.80
 $headerSize = 512
 
 function New-Graphics([System.Drawing.Bitmap]$bmp) {
