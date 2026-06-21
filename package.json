@@ -9,6 +9,7 @@
     "version:bump": "node scripts/bump-version.mjs build",
     "version:minor": "node scripts/bump-version.mjs minor",
     "version:major": "node scripts/bump-version.mjs major",
+    "deploy": "powershell -ExecutionPolicy Bypass -File scripts/deploy.ps1",
     "heroku-postbuild": "cd client && npm ci --include=dev && VITE_API_URL=/api npm run build && mkdir -p ../server/static && cp -r dist/* ../server/static/"
   }
 }

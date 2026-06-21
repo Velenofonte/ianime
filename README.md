@@ -75,6 +75,16 @@ gigalixir config:set DEFAULT_SEED_PASSWORD='your-secure-password' -a ianime
 gigalixir config:set SEED_DEFAULT_USER=true -a ianime
 gigalixir config:set ALLOW_REGISTRATION=false -a ianime
 gigalixir git:remote -a ianime
+npm run deploy
+```
+
+`npm run deploy` incrementa automaticamente il build in `client/src/version.json`, crea un commit e fa push su Gigalixir.
+
+Per bump manuale di minor/major: `npm run version:minor` / `npm run version:major`.
+
+Push manuale (sconsigliato, non aggiorna la versione):
+
+```bash
 git push gigalixir main
 ```
 
