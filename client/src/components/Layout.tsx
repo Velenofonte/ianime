@@ -1,9 +1,6 @@
-import { useEffect } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, NavLink, Outlet } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { api } from '../services/api';
-import { fetchAnimeByIds } from '../services/anilist';
+import { useFavorites } from '../hooks/useFavorites';
 import { APP_VERSION } from '../version';
 import { IconCalendar, IconHeart, IconHome, IconNews, IconSparkle } from './NavIcons';
 import { OfflineBanner } from './OfflineBanner';
@@ -29,22 +26,7 @@ const mobileNavClass = ({ isActive }: { isActive: boolean }) =>
 
 export function Layout() {
   const { user, logout } = useAuth();
-  const qc = useQueryClient();
-
-  const { data: favoriteIds } = useQuery({
-    queryKey: ['favorites'],
-    queryFn: async () => (await api.getFavorites()).anilist_ids,
-    enabled: !!user,
-  });
-
-  useEffect(() => {
-    if (!favoriteIds?.length) return;
-    void qc.prefetchQuery({
-      queryKey: ['favorites-anime', favoriteIds],
-      queryFn: () => fetchAnimeByIds(favoriteIds),
-      staleTime: 10 * 60 * 1000,
-    });
-  }, [favoriteIds, qc]);
+  useFavorites();
 
   return (
     <div className="min-h-screen bg-surface pb-16 md:pb-0">

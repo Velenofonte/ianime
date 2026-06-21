@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
-import { api } from '../services/api';
+import { useFavorites } from '../hooks/useFavorites';
 import { collectUpcomingSeasons, fetchCalendarAnimeByIds, matchesAiringDay } from '../services/anilist';
 import { WEEK_DAYS } from '../types/anime';
 
@@ -20,10 +20,7 @@ function calendarTitle(anime: { franchiseTitle: string; title: string; seasonNum
 const FAVORITE_ANIME_STALE_MS = 10 * 60 * 1000;
 
 export function CalendarPage() {
-  const { data: ids = [], isLoading: loadingIds } = useQuery({
-    queryKey: ['favorites'],
-    queryFn: async () => (await api.getFavorites()).anilist_ids,
-  });
+  const { ids, isLoading: loadingIds } = useFavorites();
 
   const { data: anime = [], isLoading: loadingAnime } = useQuery({
     queryKey: ['calendar-anime', ids],

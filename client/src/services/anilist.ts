@@ -871,6 +871,231 @@ export async function fetchAnimeById(id: number): Promise<AnimeCard | null> {
 
 const RECOMMENDATION_SOURCE_MAX = 50;
 const RECOMMENDATION_PER_PAGE = 25;
+const RECOMMENDATION_SOURCE_BATCH_SIZE = 8;
+const RECOMMENDATION_HYDRATE_BATCH_SIZE = 24;
+
+interface RawRecommendationEdge {
+  node: {
+    rating: number | null;
+    mediaRecommendation: {
+      id: number;
+      format: string;
+      genres: string[];
+    } | null;
+  };
+}
+
+export interface RecommendationsPageResult {
+  media: AnimeCard[];
+  hasNextPage: boolean;
+}
+
+export interface FavoriteExclusions {
+  excludedIds: Set<number>;
+  excludedSlugs: Set<string>;
+}
+
+const favoriteExclusionCache = new Map<string, FavoriteExclusions>();
+
+export function buildFavoriteExclusionsFromCards(
+  favoriteIds: number[],
+  cards: AnimeCard[]
+): FavoriteExclusions {
+  const collapsed = collapseFranchises(cards);
+  const excludedIds = new Set<number>(favoriteIds);
+  const excludedSlugs = new Set<string>();
+
+  for (const card of collapsed) {
+    excludedSlugs.add(card.titleSlug);
+    for (const id of seasonIdsForCard(card)) {
+      excludedIds.add(id);
+    }
+  }
+
+  return { excludedIds, excludedSlugs };
+}
+
+export async function loadFavoriteExclusions(
+  favoriteIds: number[],
+  prefetchedCards?: AnimeCard[]
+): Promise<FavoriteExclusions> {
+  const key = [...favoriteIds].sort((a, b) => a - b).join(',');
+  const cached = favoriteExclusionCache.get(key);
+  if (cached) return cached;
+
+  const cardSource = prefetchedCards ?? (await fetchAnimeByIds(favoriteIds, { skipJikan: true }));
+  const result = buildFavoriteExclusionsFromCards(favoriteIds, cardSource);
+  favoriteExclusionCache.set(key, result);
+  return result;
+}
+
+function isExcludedFromSuggestions(card: AnimeCard, exclusions: FavoriteExclusions): boolean {
+  if (exclusions.excludedSlugs.has(card.titleSlug)) return true;
+  return seasonIdsForCard(card).some((id) => exclusions.excludedIds.has(id));
+}
+
+function mergeRecommendationScores(
+  target: Map<number, number>,
+  source: Map<number, number>
+): void {
+  for (const [id, rating] of source) {
+    target.set(id, (target.get(id) ?? 0) + rating);
+  }
+}
+
+function scoresFromRecommendationResponse(
+  mediaList: {
+    recommendations: {
+      pageInfo: { hasNextPage: boolean };
+      edges: RawRecommendationEdge[];
+    };
+  }[],
+  exclusions: FavoriteExclusions
+): { scores: Map<number, number>; hasNextPage: boolean } {
+  const scores = new Map<number, number>();
+  let hasNextPage = false;
+
+  for (const media of mediaList) {
+    if (media.recommendations.pageInfo?.hasNextPage) hasNextPage = true;
+
+    for (const edge of media.recommendations.edges) {
+      const rec = edge.node.mediaRecommendation;
+      if (!rec) continue;
+      if (!isTvSeasonFormat(rec.format)) continue;
+      if (isExcludedRawMedia(rec)) continue;
+      if (exclusions.excludedIds.has(rec.id)) continue;
+
+      const rating = edge.node.rating ?? 0;
+      scores.set(rec.id, (scores.get(rec.id) ?? 0) + rating);
+    }
+  }
+
+  return { scores, hasNextPage };
+}
+
+async function fetchRecommendationScoresChunk(
+  sourceIds: number[],
+  recPage: number,
+  exclusions: FavoriteExclusions
+): Promise<{ scores: Map<number, number>; hasNextPage: boolean }> {
+  const query = `
+    query ($ids: [Int], $recPage: Int) {
+      Page(perPage: 50) {
+        media(id_in: $ids, type: ANIME) {
+          id
+          recommendations(page: $recPage, perPage: ${RECOMMENDATION_PER_PAGE}, sort: RATING_DESC) {
+            pageInfo { hasNextPage }
+            edges {
+              node {
+                rating
+                mediaRecommendation {
+                  id
+                  format
+                  genres
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  `;
+
+  const data = await anilistQuery<{
+    Page: {
+      media: {
+        id: number;
+        recommendations: {
+          pageInfo: { hasNextPage: boolean };
+          edges: RawRecommendationEdge[];
+        };
+      }[];
+    };
+  }>(query, { ids: sourceIds, recPage });
+
+  return scoresFromRecommendationResponse(data.Page.media, exclusions);
+}
+
+export async function fetchRecommendationScoresBatched(
+  sourceIds: number[],
+  recPage: number,
+  exclusions: FavoriteExclusions,
+  onBatchComplete?: (partial: { scores: Map<number, number>; hasNextPage: boolean }) => void | Promise<void>
+): Promise<{ scores: Map<number, number>; hasNextPage: boolean }> {
+  const totalScores = new Map<number, number>();
+  let hasNextPage = false;
+
+  for (let i = 0; i < sourceIds.length; i += RECOMMENDATION_SOURCE_BATCH_SIZE) {
+    if (i > 0) await sleep(ANILIST_BATCH_DELAY_MS);
+
+    const chunk = sourceIds.slice(i, i + RECOMMENDATION_SOURCE_BATCH_SIZE);
+    const { scores, hasNextPage: chunkHasNext } = await fetchRecommendationScoresChunk(
+      chunk,
+      recPage,
+      exclusions
+    );
+
+    mergeRecommendationScores(totalScores, scores);
+    hasNextPage = hasNextPage || chunkHasNext;
+    if (onBatchComplete) {
+      await onBatchComplete({ scores: new Map(totalScores), hasNextPage });
+    }
+  }
+
+  return { scores: totalScores, hasNextPage };
+}
+
+export function rankRecommendationIds(scores: Map<number, number>): number[] {
+  return [...scores.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([id]) => id);
+}
+
+export function scoreForRecommendationCard(card: AnimeCard, scores: Map<number, number>): number {
+  return Math.max(...seasonIdsForCard(card).map((id) => scores.get(id) ?? 0));
+}
+
+export async function hydrateRecommendationCards(
+  rankedIds: number[],
+  exclusions: FavoriteExclusions,
+  alreadyShownIds?: Set<number>
+): Promise<AnimeCard[]> {
+  const pending = rankedIds.filter((id) => !alreadyShownIds?.has(id)).slice(0, RECOMMENDATION_HYDRATE_BATCH_SIZE);
+  if (!pending.length) return [];
+
+  return collapseFranchises(await fetchAnimeByIds(pending, { skipJikan: true })).filter(
+    (card) => !isExcludedFromSuggestions(card, exclusions)
+  );
+}
+
+export interface FetchRecommendationsOptions {
+  prefetchedFavoriteCards?: AnimeCard[];
+}
+
+export async function fetchRecommendationsPage(
+  favoriteIds: number[],
+  recPage: number,
+  options?: FetchRecommendationsOptions
+): Promise<RecommendationsPageResult> {
+  if (!favoriteIds.length) return { media: [], hasNextPage: false };
+
+  const sourceIds = favoriteIds.slice(0, RECOMMENDATION_SOURCE_MAX);
+  const exclusions = await loadFavoriteExclusions(favoriteIds, options?.prefetchedFavoriteCards);
+
+  const { scores, hasNextPage } = await fetchRecommendationScoresBatched(sourceIds, recPage, exclusions);
+  const rankedIds = rankRecommendationIds(scores);
+
+  if (!rankedIds.length) {
+    return { media: [], hasNextPage };
+  }
+
+  if (recPage > 1) await sleep(ANILIST_BATCH_DELAY_MS);
+
+  const cards = collapseFranchises(await fetchAnimeByIds(rankedIds, { skipJikan: true })).filter(
+    (card) => !isExcludedFromSuggestions(card, exclusions)
+  );
+  return { media: cards, hasNextPage };
+}
 
 const SEASON_MONTH: Record<string, number> = {
   WINTER: 0,
@@ -930,133 +1155,6 @@ export function collectUpcomingSeasons(cards: AnimeCard[]): UpcomingSeasonEntry[
   }
 
   return entries.sort((a, b) => a.sortKey - b.sortKey);
-}
-
-interface RawRecommendationEdge {
-  node: {
-    rating: number | null;
-    mediaRecommendation: {
-      id: number;
-      format: string;
-      genres: string[];
-    } | null;
-  };
-}
-
-export interface RecommendationsPageResult {
-  media: AnimeCard[];
-  hasNextPage: boolean;
-}
-
-interface FavoriteExclusions {
-  excludedIds: Set<number>;
-  excludedSlugs: Set<string>;
-}
-
-const favoriteExclusionCache = new Map<string, FavoriteExclusions>();
-
-async function loadFavoriteExclusions(favoriteIds: number[]): Promise<FavoriteExclusions> {
-  const key = [...favoriteIds].sort((a, b) => a - b).join(',');
-  const cached = favoriteExclusionCache.get(key);
-  if (cached) return cached;
-
-  const cards = collapseFranchises(await fetchAnimeByIds(favoriteIds, { skipJikan: true }));
-  const excludedIds = new Set<number>(favoriteIds);
-  const excludedSlugs = new Set<string>();
-
-  for (const card of cards) {
-    excludedSlugs.add(card.titleSlug);
-    for (const id of seasonIdsForCard(card)) {
-      excludedIds.add(id);
-    }
-  }
-
-  const result = { excludedIds, excludedSlugs };
-  favoriteExclusionCache.set(key, result);
-  return result;
-}
-
-function isExcludedFromSuggestions(card: AnimeCard, exclusions: FavoriteExclusions): boolean {
-  if (exclusions.excludedSlugs.has(card.titleSlug)) return true;
-  return seasonIdsForCard(card).some((id) => exclusions.excludedIds.has(id));
-}
-
-export async function fetchRecommendationsPage(
-  favoriteIds: number[],
-  recPage: number
-): Promise<RecommendationsPageResult> {
-  if (!favoriteIds.length) return { media: [], hasNextPage: false };
-
-  const sourceIds = favoriteIds.slice(0, RECOMMENDATION_SOURCE_MAX);
-  const exclusions = await loadFavoriteExclusions(favoriteIds);
-
-  const query = `
-    query ($ids: [Int], $recPage: Int) {
-      Page(perPage: 50) {
-        media(id_in: $ids, type: ANIME) {
-          id
-          recommendations(page: $recPage, perPage: ${RECOMMENDATION_PER_PAGE}, sort: RATING_DESC) {
-            pageInfo { hasNextPage }
-            edges {
-              node {
-                rating
-                mediaRecommendation {
-                  id
-                  format
-                  genres
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-  `;
-
-  const data = await anilistQuery<{
-    Page: {
-      media: {
-        id: number;
-        recommendations: {
-          pageInfo: { hasNextPage: boolean };
-          edges: RawRecommendationEdge[];
-        };
-      }[];
-    };
-  }>(query, { ids: sourceIds, recPage });
-
-  const scores = new Map<number, number>();
-  let hasNextPage = false;
-
-  for (const media of data.Page.media) {
-    if (media.recommendations.pageInfo?.hasNextPage) hasNextPage = true;
-
-    for (const edge of media.recommendations.edges) {
-      const rec = edge.node.mediaRecommendation;
-      if (!rec) continue;
-      if (!isTvSeasonFormat(rec.format)) continue;
-      if (isExcludedRawMedia(rec)) continue;
-      if (exclusions.excludedIds.has(rec.id)) continue;
-
-      const rating = edge.node.rating ?? 0;
-      scores.set(rec.id, (scores.get(rec.id) ?? 0) + rating);
-    }
-  }
-
-  const rankedIds = [...scores.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .map(([id]) => id);
-
-  if (!rankedIds.length) {
-    return { media: [], hasNextPage };
-  }
-
-  if (recPage > 1) await sleep(ANILIST_BATCH_DELAY_MS);
-
-  const cards = collapseFranchises(
-    await fetchAnimeByIds(rankedIds, { skipJikan: true })
-  ).filter((card) => !isExcludedFromSuggestions(card, exclusions));
-  return { media: cards, hasNextPage };
 }
 
 export async function fetchAnimeByIds(

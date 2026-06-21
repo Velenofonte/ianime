@@ -1,7 +1,6 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { api } from '../services/api';
+import { useFavorites } from '../hooks/useFavorites';
 
 export function FavoriteButton({
   anilistId,
@@ -14,40 +13,29 @@ export function FavoriteButton({
 }) {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const qc = useQueryClient();
+  const { ids: favorites, addFavorite, removeFavorite } = useFavorites();
   const ids = relatedIds?.length ? relatedIds : [anilistId];
 
-  const { data: favorites = [] } = useQuery({
-    queryKey: ['favorites'],
-    queryFn: async () => (await api.getFavorites()).anilist_ids,
-    enabled: !!user,
-  });
-
   const isFavorite = ids.some((id) => favorites.includes(id));
-
-  const toggle = useMutation({
-    mutationFn: async () => {
-      if (!user) {
-        navigate('/login');
-        return;
-      }
-      if (isFavorite) {
-        await Promise.all(ids.filter((id) => favorites.includes(id)).map((id) => api.removeFavorite(id)));
-      } else {
-        await api.addFavorite(anilistId);
-      }
-    },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['favorites'] }),
-  });
+  const isPending = addFavorite.isPending || removeFavorite.isPending;
 
   return (
     <button
       type="button"
       aria-label={isFavorite ? 'Rimuovi dai preferiti' : 'Aggiungi ai preferiti'}
+      disabled={isPending}
       onClick={(e) => {
         e.preventDefault();
         e.stopPropagation();
-        toggle.mutate();
+        if (!user) {
+          navigate('/login');
+          return;
+        }
+        if (isFavorite) {
+          removeFavorite.mutate(ids.filter((id) => favorites.includes(id)));
+        } else {
+          addFavorite.mutate(anilistId);
+        }
       }}
       className={
         inline

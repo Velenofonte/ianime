@@ -1,10 +1,9 @@
-import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { AnimeCard } from '../components/AnimeCard';
 import { SkeletonGrid } from '../components/Skeleton';
-import { api } from '../services/api';
-import { fetchRecommendationsPage } from '../services/anilist';
+import { useFavorites } from '../hooks/useFavorites';
+import { useProgressiveRecommendations } from '../hooks/useProgressiveRecommendations';
 
 function LoadMoreIndicator({ loading }: { loading: boolean }) {
   if (!loading) {
@@ -29,62 +28,10 @@ export function SuggestionsPage() {
   const sentinelRef = useRef<HTMLDivElement>(null);
   const wasFetchingRef = useRef(false);
 
-  const { data: ids = [], isLoading: loadingIds } = useQuery({
-    queryKey: ['favorites'],
-    queryFn: async () => (await api.getFavorites()).anilist_ids,
-  });
+  const { ids, isLoading: loadingIds } = useFavorites();
+  const query = useProgressiveRecommendations(ids);
 
-  const query = useInfiniteQuery({
-    queryKey: ['recommendations', ids],
-    queryFn: ({ pageParam }) => fetchRecommendationsPage(ids, pageParam as number),
-    initialPageParam: 1,
-    getNextPageParam: (last, pages) => (last.hasNextPage ? pages.length + 1 : undefined),
-    enabled: ids.length > 0,
-    staleTime: 30 * 60 * 1000,
-    retry: 2,
-    retryDelay: (attempt) => 2000 * (attempt + 1),
-  });
-
-  const allMedia = useMemo(() => {
-    const seen = new Set<string>();
-    const result = [];
-    for (const page of query.data?.pages ?? []) {
-      for (const anime of page.media) {
-        if (seen.has(anime.franchiseKey)) continue;
-        seen.add(anime.franchiseKey);
-        result.push(anime);
-      }
-    }
-    return result;
-  }, [query.data]);
-
-  const pageCount = query.data?.pages.length ?? 0;
-  const isLoadingMore =
-    query.isFetchingNextPage || (query.isFetching && !query.isLoading && pageCount > 0);
-
-  useEffect(() => {
-    if (query.isLoading || query.isFetching || !query.hasNextPage) return;
-    const pages = query.data?.pages ?? [];
-    const lastPage = pages.length ? pages[pages.length - 1] : undefined;
-    if (!lastPage || lastPage.media.length > 0) return;
-
-    let consecutiveEmpty = 0;
-    for (let i = pages.length - 1; i >= 0; i--) {
-      if (pages[i].media.length > 0) break;
-      consecutiveEmpty++;
-    }
-    if (consecutiveEmpty > 5) return;
-
-    const t = setTimeout(() => query.fetchNextPage(), 800);
-    return () => clearTimeout(t);
-  }, [
-    query.isLoading,
-    query.isFetching,
-    query.hasNextPage,
-    query.data?.pages,
-    pageCount,
-    query.fetchNextPage,
-  ]);
+  const isFetching = query.isLoadingMore;
 
   useEffect(() => {
     const el = sentinelRef.current;
@@ -92,8 +39,8 @@ export function SuggestionsPage() {
 
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries[0]?.isIntersecting && query.hasNextPage && !query.isFetching) {
-          query.fetchNextPage();
+        if (entries[0]?.isIntersecting && query.hasNextPage && !isFetching) {
+          void query.fetchNextPage();
         }
       },
       { rootMargin: '400px' }
@@ -101,24 +48,24 @@ export function SuggestionsPage() {
 
     observer.observe(el);
     return () => observer.disconnect();
-  }, [query.hasNextPage, query.isFetching, pageCount, query.fetchNextPage]);
+  }, [query.hasNextPage, isFetching, query.media.length, query.fetchNextPage]);
 
   useEffect(() => {
-    const justFinished = wasFetchingRef.current && !query.isFetching;
-    wasFetchingRef.current = query.isFetching;
+    const justFinished = wasFetchingRef.current && !isFetching;
+    wasFetchingRef.current = isFetching;
 
-    if (!justFinished || !query.hasNextPage || query.isLoading) return;
+    if (!justFinished || !query.hasNextPage || query.isInitialLoading) return;
 
     const el = sentinelRef.current;
     if (!el) return;
 
     const rect = el.getBoundingClientRect();
     if (rect.top <= window.innerHeight + 400) {
-      query.fetchNextPage();
+      void query.fetchNextPage();
     }
-  }, [query.isFetching, query.isLoading, query.hasNextPage, query.fetchNextPage]);
+  }, [isFetching, query.isInitialLoading, query.hasNextPage, query.fetchNextPage]);
 
-  if (loadingIds || query.isLoading) {
+  if (loadingIds || query.isInitialLoading) {
     return (
       <div>
         <h1 className="mb-2 text-2xl font-bold">Suggerimenti</h1>
@@ -140,21 +87,21 @@ export function SuggestionsPage() {
     );
   }
 
-  if (query.isError && !query.data?.pages.length) {
+  if (query.isError && !query.media.length) {
     return (
       <div>
         <h1 className="mb-2 text-2xl font-bold">Suggerimenti</h1>
         <p className="mb-6 text-sm text-gray-400">Basato sui tuoi preferiti · consigli dalla community AniList</p>
         <p className="rounded-lg bg-red-500/10 p-4 text-red-400">
-          Errore nel caricamento: {(query.error as Error).message}
+          Errore nel caricamento: {query.error?.message}
         </p>
         <button
           type="button"
           onClick={() => query.refetch()}
-          disabled={query.isFetching}
+          disabled={query.isInitialLoading || query.isAnalyzingFavorites}
           className="mt-3 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/80 disabled:opacity-50"
         >
-          {query.isFetching ? 'Riprovo...' : 'Riprova'}
+          {query.isInitialLoading ? 'Riprovo...' : 'Riprova'}
         </button>
       </div>
     );
@@ -165,36 +112,40 @@ export function SuggestionsPage() {
       <h1 className="mb-2 text-2xl font-bold">Suggerimenti</h1>
       <p className="mb-6 text-sm text-gray-400">Basato sui tuoi preferiti · consigli dalla community AniList</p>
 
-      {!allMedia.length ? (
+      {query.isAnalyzingFavorites && (
+        <p className="mb-4 rounded-lg border border-accent/20 bg-accent/5 px-4 py-2 text-sm text-gray-300">
+          Analisi di altri preferiti in corso…
+        </p>
+      )}
+
+      {!query.media.length ? (
         <p className="rounded-lg bg-surface-card p-4 text-gray-400">
           Nessun suggerimento disponibile al momento. Prova ad aggiungere altri preferiti.
         </p>
       ) : (
         <>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {allMedia.map((a) => (
+            {query.media.map((a) => (
               <AnimeCard key={a.franchiseKey} anime={a} />
             ))}
           </div>
 
           {query.hasNextPage && (
             <div ref={sentinelRef}>
-              <LoadMoreIndicator loading={isLoadingMore} />
+              <LoadMoreIndicator loading={query.isLoadingMore} />
             </div>
           )}
 
-          {query.isFetchNextPageError && (
+          {query.isError && (
             <div className="mt-6 rounded-lg bg-red-500/10 p-4 text-center">
-              <p className="text-red-400">
-                Errore nel caricamento: {(query.error as Error).message}
-              </p>
+              <p className="text-red-400">Errore nel caricamento: {query.error?.message}</p>
               <button
                 type="button"
-                onClick={() => query.fetchNextPage()}
-                disabled={query.isFetching}
+                onClick={() => void query.fetchNextPage()}
+                disabled={query.isLoadingMore}
                 className="mt-3 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/80 disabled:opacity-50"
               >
-                {query.isFetching ? 'Riprovo...' : 'Riprova'}
+                {query.isLoadingMore ? 'Riprovo...' : 'Riprova'}
               </button>
             </div>
           )}

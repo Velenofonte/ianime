@@ -1,27 +1,12 @@
-import { useMemo } from 'react';
-import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { AnimeCard } from '../components/AnimeCard';
 import { SkeletonGrid } from '../components/Skeleton';
-import { api } from '../services/api';
-import { collapseFranchises, fetchAnimeByIds } from '../services/anilist';
+import { useFavoritesAnime } from '../hooks/useFavorites';
 
 export function FavoritesPage() {
-  const { data: ids = [], isLoading: loadingIds } = useQuery({
-    queryKey: ['favorites'],
-    queryFn: async () => (await api.getFavorites()).anilist_ids,
-  });
+  const { ids, franchiseAnime, isLoading } = useFavoritesAnime();
 
-  const { data: anime = [], isLoading: loadingAnime } = useQuery({
-    queryKey: ['favorites-anime', ids],
-    queryFn: () => fetchAnimeByIds(ids),
-    enabled: ids.length > 0,
-    staleTime: 10 * 60 * 1000,
-  });
-
-  const franchiseAnime = useMemo(() => collapseFranchises(anime), [anime]);
-
-  if (loadingIds || loadingAnime) return <SkeletonGrid count={4} />;
+  if (isLoading) return <SkeletonGrid count={4} />;
 
   if (!ids.length) {
     return (
