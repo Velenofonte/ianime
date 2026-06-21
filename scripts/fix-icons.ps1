@@ -7,7 +7,7 @@ $iconsDir = Join-Path $PSScriptRoot "..\client\public\icons" | Resolve-Path
 $sourceAsset = Join-Path $iconsDir "source\ianime-logo-approved2.png"
 
 # Margine attorno al logo nel master quadrato (~3.5% del lato)
-$contentPaddingRatio = 0.035
+$contentPaddingRatio = 0.04
 # Maskable: leggero inset per le maschere OS (il master e gia ritagliato stretto)
 $maskableScale = 0.90
 $headerSize = 512
