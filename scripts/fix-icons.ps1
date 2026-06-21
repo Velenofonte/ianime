@@ -1,4 +1,4 @@
-# Genera le icone PWA a partire dal master definitivo.
+# Genera le icone PWA dal master definitivo (ritaglio stretto sul logo).
 # Uso: powershell -ExecutionPolicy Bypass -File scripts/fix-icons.ps1
 
 Add-Type -AssemblyName System.Drawing
@@ -6,10 +6,10 @@ Add-Type -AssemblyName System.Drawing
 $iconsDir = Join-Path $PSScriptRoot "..\client\public\icons" | Resolve-Path
 $sourceAsset = Join-Path $iconsDir "source\ianime-logo-approved2.png"
 
-# Maskable Android: contenuto importante nel cerchio centrale (~80% del lato)
-$maskableSafeScale = 0.80
-# Icone "any" e header: riempimento quasi pieno del quadrato
-$anyFillScale = 1.0
+# Margine attorno al logo nel master quadrato (~3.5% del lato)
+$contentPaddingRatio = 0.035
+# Maskable: leggero inset per le maschere OS (il master e gia ritagliato stretto)
+$maskableScale = 0.94
 $headerSize = 512
 
 function New-Graphics([System.Drawing.Bitmap]$bmp) {
@@ -31,6 +31,11 @@ function Get-BackgroundColor([System.Drawing.Bitmap]$bmp) {
   $r = 0; $g = 0; $b = 0
   foreach ($c in $samples) { $r += $c.R; $g += $c.G; $b += $c.B }
   [System.Drawing.Color]::FromArgb(255, [int]($r / 4), [int]($g / 4), [int]($b / 4))
+}
+
+function Test-ContentPixel([System.Drawing.Color]$c, [System.Drawing.Color]$bg) {
+  $delta = [Math]::Abs($c.R - $bg.R) + [Math]::Abs($c.G - $bg.G) + [Math]::Abs($c.B - $bg.B)
+  $delta -gt 28
 }
 
 function Test-NearWhite([System.Drawing.Color]$c) {
@@ -64,16 +69,47 @@ function Clear-EdgeArtifacts([System.Drawing.Bitmap]$bmp, [System.Drawing.Color]
   }
 }
 
-# Inserisce l'intera immagine su un canvas quadrato (nessun taglio del logo)
-function Convert-ToSquareMaster([System.Drawing.Bitmap]$src, [System.Drawing.Color]$bg) {
-  $side = [Math]::Max($src.Width, $src.Height)
+function Get-ContentBounds([System.Drawing.Bitmap]$bmp, [System.Drawing.Color]$bg) {
+  $w = $bmp.Width; $h = $bmp.Height
+  $minX = $w; $minY = $h; $maxX = -1; $maxY = -1
+  for ($y = 0; $y -lt $h; $y++) {
+    for ($x = 0; $x -lt $w; $x++) {
+      if (-not (Test-ContentPixel ($bmp.GetPixel($x, $y)) $bg)) { continue }
+      if ($x -lt $minX) { $minX = $x }
+      if ($y -lt $minY) { $minY = $y }
+      if ($x -gt $maxX) { $maxX = $x }
+      if ($y -gt $maxY) { $maxY = $y }
+    }
+  }
+  if ($maxX -lt 0) { return $null }
+  @{ MinX = $minX; MinY = $minY; MaxX = $maxX; MaxY = $maxY }
+}
+
+# Ritaglia stretto sul logo e produce un quadrato con poco sfondo
+function Convert-ToTightSquare([System.Drawing.Bitmap]$src, [System.Drawing.Color]$bg, [double]$paddingRatio) {
+  $bounds = Get-ContentBounds $src $bg
+  if ($null -eq $bounds) { throw "Nessun contenuto rilevato nel master" }
+
+  $cw = $bounds.MaxX - $bounds.MinX + 1
+  $ch = $bounds.MaxY - $bounds.MinY + 1
+  $pad = [int][Math]::Ceiling([Math]::Max($cw, $ch) * $paddingRatio)
+  $side = [Math]::Max($cw, $ch) + (2 * $pad)
+
+  $cx = ($bounds.MinX + $bounds.MaxX) / 2.0
+  $cy = ($bounds.MinY + $bounds.MaxY) / 2.0
+  $srcX = [int][Math]::Floor($cx - $side / 2.0)
+  $srcY = [int][Math]::Floor($cy - $side / 2.0)
+
   $bmp = New-Object System.Drawing.Bitmap $side, $side
   $g = New-Graphics $bmp
   $g.Clear($bg)
-  $dx = [int](($side - $src.Width) / 2)
-  $dy = [int](($side - $src.Height) / 2)
-  $g.DrawImage($src, $dx, $dy, $src.Width, $src.Height)
+
+  $destRect = New-Object System.Drawing.Rectangle 0, 0, $side, $side
+  $srcRect = New-Object System.Drawing.Rectangle $srcX, $srcY, $side, $side
+  $g.DrawImage($src, $destRect, $srcRect, [System.Drawing.GraphicsUnit]::Pixel)
   $g.Dispose()
+
+  Write-Host "Contenuto $($bounds.MinX)-$($bounds.MaxX) x $($bounds.MinY)-$($bounds.MaxY), pad ${pad}px, quadrato ${side}x${side}"
   $bmp
 }
 
@@ -95,30 +131,27 @@ if (-not (Test-Path $sourceAsset)) {
   exit 1
 }
 
-Write-Host "Generazione icone PWA da master definitivo..."
+Write-Host "Generazione icone PWA..."
 $loaded = [System.Drawing.Bitmap]::FromFile($sourceAsset)
 Write-Host "Master: $($loaded.Width)x$($loaded.Height)"
 
 $bg = Get-BackgroundColor $loaded
 Write-Host "Sfondo: RGB($($bg.R),$($bg.G),$($bg.B))"
 
-$master = Convert-ToSquareMaster $loaded $bg
+Clear-EdgeArtifacts $loaded $bg
+$master = Convert-ToTightSquare $loaded $bg $contentPaddingRatio
 $loaded.Dispose()
-Write-Host "Canvas quadrato: $($master.Width)x$($master.Height)"
 
 Clear-EdgeArtifacts $master $bg
 
-$iconPng = Join-Path $iconsDir "icon.png"
-Write-ScaledIcon $master $bg $iconPng $headerSize $anyFillScale
-
-Write-ScaledIcon $master $bg (Join-Path $iconsDir "icon-512.png") 512 $anyFillScale
-Write-ScaledIcon $master $bg (Join-Path $iconsDir "icon-192.png") 192 $anyFillScale
-Write-ScaledIcon $master $bg (Join-Path $iconsDir "icon-512-maskable.png") 512 $maskableSafeScale
-Write-ScaledIcon $master $bg (Join-Path $iconsDir "icon-192-maskable.png") 192 $maskableSafeScale
+Write-ScaledIcon $master $bg (Join-Path $iconsDir "icon.png") $headerSize 1.0
+Write-ScaledIcon $master $bg (Join-Path $iconsDir "icon-512.png") 512 1.0
+Write-ScaledIcon $master $bg (Join-Path $iconsDir "icon-192.png") 192 1.0
+Write-ScaledIcon $master $bg (Join-Path $iconsDir "icon-512-maskable.png") 512 $maskableScale
+Write-ScaledIcon $master $bg (Join-Path $iconsDir "icon-192-maskable.png") 192 $maskableScale
 
 $master.Dispose()
 
 Write-Host "Fatto."
-Write-Host "  icon.png              -> header / favicon ($headerSize, fill $anyFillScale)"
-Write-Host "  icon-512/192.png      -> PWA purpose=any (fill $anyFillScale)"
-Write-Host "  icon-512/192-maskable -> PWA purpose=maskable (safe zone $maskableSafeScale)"
+Write-Host "  icon.png / icon-512/192.png      -> fill 100%"
+Write-Host "  icon-512/192-maskable.png         -> scale $maskableScale"
