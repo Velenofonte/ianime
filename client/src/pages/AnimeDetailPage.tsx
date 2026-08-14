@@ -4,6 +4,7 @@ import { it } from 'date-fns/locale';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { FavoriteButton } from '../components/FavoriteButton';
 import { AnimeDescription } from '../components/AnimeDescription';
+import { AppLink } from '../components/AppLink';
 import { ItalianVerificationNote } from '../components/ItalianVerificationNote';
 import { PosterImage } from '../components/PosterImage';
 import { StarRating } from '../components/StarRating';
@@ -99,11 +100,9 @@ function StreamingLinks({ links }: { links: StreamingLink[] }) {
         {links.map((link) => {
           const isItalian = link.language?.toLowerCase() === 'italian';
           return (
-            <a
+            <AppLink
               key={link.url}
               href={link.url}
-              target="_blank"
-              rel="noopener noreferrer"
               className={`rounded-lg border px-3 py-1.5 text-sm transition ${
                 isItalian
                   ? 'border-accent/40 bg-accent/10 text-accent-light hover:border-accent'
@@ -112,7 +111,7 @@ function StreamingLinks({ links }: { links: StreamingLink[] }) {
             >
               {link.site}
               {isItalian ? ' · IT' : ''}
-            </a>
+            </AppLink>
           );
         })}
       </div>
@@ -225,14 +224,12 @@ export function AnimeDetailPage() {
           </div>
 
           {anime.trailerUrl && (
-            <a
+            <AppLink
               href={anime.trailerUrl}
-              target="_blank"
-              rel="noopener noreferrer"
               className="inline-flex rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/80"
             >
               Guarda trailer
-            </a>
+            </AppLink>
           )}
 
           <StarRating score={anime.averageScore} size="md" />
