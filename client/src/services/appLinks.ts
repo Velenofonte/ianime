@@ -37,7 +37,7 @@ function youtubeWatchUrl(url: URL): URL {
 const PRIME_ASIN_RE = /\b(B[0-9A-Z]{9})\b/i;
 const PRIME_CATALOG_ID_RE = /\b(0[0-9A-Z]{15,})\b/;
 const PRIME_EU_WEB = 'https://www.primevideo.com/region/eu/';
-/** /home è nell'intent-filter; app.primevideo.com senza path manda al Play Store. */
+/** /home apre l'app; /detail?gti= è il deep link titolo verificato (anche con ASIN). */
 const PRIME_LAUNCH_INTENT = `intent://app.primevideo.com/home#Intent;scheme=https;package=${ANDROID_PACKAGES.prime};end`;
 
 function primeAsin(url: URL): string | null {
@@ -60,9 +60,15 @@ function primeCatalogId(url: URL): string | null {
   return null;
 }
 
-function isUsAmazonHost(url: URL): boolean {
-  const host = url.hostname.replace(/^www\./, '').replace(/^m\./, '').toLowerCase();
-  return host === 'amazon.com' || host.endsWith('.amazon.com');
+function primeGti(url: URL): string | null {
+  return primeCatalogId(url) || primeAsin(url);
+}
+
+function androidPrimeIntent(webUrl: string): string {
+  const url = parseUrl(webUrl);
+  const gti = url ? primeGti(url) : null;
+  if (!gti) return PRIME_LAUNCH_INTENT;
+  return `intent://app.primevideo.com/detail?gti=${encodeURIComponent(gti)}#Intent;scheme=https;package=${ANDROID_PACKAGES.prime};end`;
 }
 
 function primeEuFallback(url: URL): string {
@@ -128,7 +134,6 @@ function iosSchemeUrl(webUrl: string, target: AppTarget): string | null {
   if (target === 'netflix') return `nflx://${rest}`;
   if (target === 'crunchyroll') return `crunchyroll://${rest}`;
   if (target === 'prime') {
-    if (isUsAmazonHost(url)) return 'aiv://';
     const asin = primeAsin(url);
     if (asin) return `aiv://aiv/watch?asin=${asin}`;
     const gti = primeCatalogId(url);
@@ -160,7 +165,7 @@ export function openInNativeApp(webUrl: string, site?: string): void {
 
   if (isAndroid()) {
     if (target === 'prime') {
-      window.location.href = PRIME_LAUNCH_INTENT;
+      window.location.href = androidPrimeIntent(webUrl);
       return;
     }
     window.location.href = androidIntentUrl(webUrl, target);
