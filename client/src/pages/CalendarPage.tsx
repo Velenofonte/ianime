@@ -85,7 +85,13 @@ export function CalendarPage() {
                       )}
                       <div>
                         <p className="text-sm font-medium leading-tight">{calendarTitle(a)}</p>
-                        {a.airingTime && <p className="text-xs text-gray-400">{a.airingTime}</p>}
+                        {(a.airingTime || a.nextEpisode) && (
+                          <p className="text-xs text-gray-400">
+                            {[a.airingTime, a.nextEpisode ? `ep. ${a.nextEpisode}` : null]
+                              .filter(Boolean)
+                              .join(' · ')}
+                          </p>
+                        )}
                       </div>
                     </Link>
                   </li>
