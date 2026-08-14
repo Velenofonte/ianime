@@ -37,7 +37,7 @@ function youtubeWatchUrl(url: URL): URL {
 const PRIME_ASIN_RE = /\b(B[0-9A-Z]{9})\b/i;
 const PRIME_CATALOG_ID_RE = /\b(0[0-9A-Z]{15,})\b/;
 const PRIME_EU_WEB = 'https://www.primevideo.com/region/eu/';
-/** /home apre l'app; /detail?gti= è il deep link titolo verificato (anche con ASIN). */
+/** /home apre l'app; /detail?asin= per ASIN, /detail?gti= solo per amzn1.dv.gti. */
 const PRIME_LAUNCH_INTENT = `intent://app.primevideo.com/home#Intent;scheme=https;package=${ANDROID_PACKAGES.prime};end`;
 
 function primeAsin(url: URL): string | null {
@@ -60,15 +60,24 @@ function primeCatalogId(url: URL): string | null {
   return null;
 }
 
-function primeGti(url: URL): string | null {
-  return primeCatalogId(url) || primeAsin(url);
-}
-
 function androidPrimeIntent(webUrl: string): string {
   const url = parseUrl(webUrl);
-  const gti = url ? primeGti(url) : null;
-  if (!gti) return PRIME_LAUNCH_INTENT;
-  return `intent://app.primevideo.com/detail?gti=${encodeURIComponent(gti)}#Intent;scheme=https;package=${ANDROID_PACKAGES.prime};end`;
+  if (!url) return PRIME_LAUNCH_INTENT;
+
+  const asin = primeAsin(url);
+  if (asin) {
+    return `intent://app.primevideo.com/detail?asin=${asin}#Intent;scheme=https;package=${ANDROID_PACKAGES.prime};end`;
+  }
+
+  const id = primeCatalogId(url);
+  if (id?.startsWith('amzn1.dv.gti.')) {
+    return `intent://app.primevideo.com/detail?gti=${encodeURIComponent(id)}#Intent;scheme=https;package=${ANDROID_PACKAGES.prime};end`;
+  }
+  if (id) {
+    return `intent://app.primevideo.com/detail/${id}#Intent;scheme=https;package=${ANDROID_PACKAGES.prime};end`;
+  }
+
+  return PRIME_LAUNCH_INTENT;
 }
 
 function primeEuFallback(url: URL): string {
@@ -136,8 +145,9 @@ function iosSchemeUrl(webUrl: string, target: AppTarget): string | null {
   if (target === 'prime') {
     const asin = primeAsin(url);
     if (asin) return `aiv://aiv/watch?asin=${asin}`;
-    const gti = primeCatalogId(url);
-    if (gti) return `aiv://aiv/watch?gti=${encodeURIComponent(gti)}`;
+    const id = primeCatalogId(url);
+    if (id?.startsWith('amzn1.dv.gti.')) return `aiv://aiv/watch?gti=${encodeURIComponent(id)}`;
+    if (id) return `aiv://app.primevideo.com/detail/${id}`;
     return 'aiv://';
   }
   if (target === 'disney') return `disneyplus://${rest}`;
