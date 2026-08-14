@@ -95,7 +95,6 @@ export interface AnimeFilters {
   minStars: number;
   platform: string;
   airingDay: '' | WeekDay;
-  linkIt: boolean;
 }
 
 export interface NewsArticle {

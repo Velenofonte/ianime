@@ -11,7 +11,6 @@ interface FilterStore extends AnimeFilters {
   setMinStars: (minStars: number) => void;
   setPlatform: (platform: string) => void;
   setAiringDay: (airingDay: AnimeFilters['airingDay']) => void;
-  setLinkIt: (linkIt: boolean) => void;
   togglePanel: () => void;
   reset: () => void;
 }
@@ -25,7 +24,6 @@ const initial: AnimeFilters = {
   minStars: 0,
   platform: '',
   airingDay: '',
-  linkIt: false,
 };
 
 export const useFilterStore = create<FilterStore>((set) => ({
@@ -42,7 +40,6 @@ export const useFilterStore = create<FilterStore>((set) => ({
   setPlatform: (platform) => set({ platform }),
   setAiringDay: (airingDay) =>
     set(airingDay ? { airingDay, status: 'RELEASING' } : { airingDay }),
-  setLinkIt: (linkIt) => set({ linkIt }),
   togglePanel: () =>
     set((state) => {
       const panelOpen = !state.panelOpen;

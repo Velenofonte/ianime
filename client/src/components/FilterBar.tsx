@@ -14,7 +14,6 @@ function countActiveFilters(filters: ReturnType<typeof useFilterStore.getState>)
   if (filters.minStars > 0) count += 1;
   if (filters.platform) count += 1;
   if (filters.airingDay) count += 1;
-  if (filters.linkIt) count += 1;
   return count;
 }
 function FilterField({ label, children }: { label: string; children: ReactNode }) {
@@ -161,16 +160,6 @@ export function FilterBar() {
                     {PLATFORM_OPTIONS.map((o) => (
                       <option key={o.value} value={o.value}>{o.label}</option>
                     ))}
-                  </select>
-                </FilterField>
-                <FilterField label="Link IT">
-                  <select
-                    value={filters.linkIt ? '1' : ''}
-                    onChange={(e) => filters.setLinkIt(e.target.value === '1')}
-                    className="rounded-lg border border-white/10 bg-surface px-3 py-2 text-sm"
-                  >
-                    <option value="">Tutti</option>
-                    <option value="1">Solo link IT (AniList)</option>
                   </select>
                 </FilterField>
                 <div className="hidden items-end xl:flex">

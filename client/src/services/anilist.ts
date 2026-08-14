@@ -1403,7 +1403,6 @@ export function filterAnimeClientSide(
     platform: string;
     status?: AnimeStatus | '';
     airingDay?: string;
-    linkIt?: boolean;
   }
 ): AnimeCard[] {
   return media.filter((a) => {
@@ -1417,7 +1416,6 @@ export function filterAnimeClientSide(
       if (a.franchiseStatus !== 'RELEASING') return false;
       if (!matchesAiringDay(a, filters.airingDay)) return false;
     }
-    if (filters.linkIt && !a.hasItalianLink) return false;
     return true;
   });
 }

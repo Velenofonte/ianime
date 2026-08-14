@@ -88,7 +88,7 @@ export function HomePage() {
     refetchOnMount: false,
   });
 
-  const filterViewKey = `${queryKey.join('|')}|${filters.airingDay}|${filters.linkIt ? '1' : '0'}`;
+  const filterViewKey = `${queryKey.join('|')}|${filters.airingDay}`;
 
   useEffect(() => {
     if (isFirstFilterEffect.current) {
@@ -103,8 +103,7 @@ export function HomePage() {
     !!filters.platform ||
     filters.status === 'FINISHED' ||
     filters.status === 'NOT_YET_RELEASED' ||
-    !!filters.airingDay ||
-    filters.linkIt;
+    !!filters.airingDay;
 
   const allMedia = useMemo(() => {
     const raw = query.data?.pages.flatMap((p) => p.media) ?? [];
@@ -113,7 +112,6 @@ export function HomePage() {
       platform: filters.platform,
       status: filters.status || undefined,
       airingDay: filters.airingDay || undefined,
-      linkIt: filters.linkIt,
     });
     return collapseFranchises(filtered);
   }, [
@@ -122,7 +120,6 @@ export function HomePage() {
     filters.platform,
     filters.status,
     filters.airingDay,
-    filters.linkIt,
   ]);
 
   const pageCount = query.data?.pages.length ?? 0;
@@ -203,12 +200,7 @@ export function HomePage() {
       )}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         {allMedia.map((anime) => (
-          <AnimeCard
-            key={anime.franchiseKey}
-            anime={anime}
-            showItalianNote
-            italianVerified={filters.linkIt}
-          />
+          <AnimeCard key={anime.franchiseKey} anime={anime} showItalianNote />
         ))}
       </div>
 
