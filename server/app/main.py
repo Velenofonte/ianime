@@ -6,7 +6,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
-from app.routers import auth, descriptions, favorites, news
+from app.routers import auth, descriptions, favorites, news, prime
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
@@ -24,6 +24,7 @@ app.include_router(auth.router, prefix="/api")
 app.include_router(favorites.router, prefix="/api")
 app.include_router(descriptions.router, prefix="/api")
 app.include_router(news.router, prefix="/api")
+app.include_router(prime.router, prefix="/api")
 
 
 @app.get("/api/health")

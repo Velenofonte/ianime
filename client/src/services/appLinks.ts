@@ -34,22 +34,61 @@ function youtubeWatchUrl(url: URL): URL {
   return url;
 }
 
-const PRIME_ASIN_RE = /\b(B[0-9A-Z]{9})\b/i;
 const PRIME_CATALOG_ID_RE = /\b(0[0-9A-Z]{15,})\b/;
 const PRIME_EU_WEB = 'https://www.primevideo.com/region/eu/';
-/** /home apre l'app; /detail?asin= per ASIN, /detail?gti= solo per amzn1.dv.gti. */
+/** /home apre l'app. /detail accetta solo gti=amzn1.dv.gti.{uuid} — ASIN/asin= causano parse error. */
 const PRIME_LAUNCH_INTENT = `intent://app.primevideo.com/home#Intent;scheme=https;package=${ANDROID_PACKAGES.prime};end`;
+const PRIME_GTI_RE =
+  /^amzn\d\.dv\.gti\.[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
+const API_URL = import.meta.env.VITE_API_URL || '/api';
+const primeGtiCache = new Map<string, string | null>();
+const primeGtiPending = new Map<string, Promise<string | null>>();
 
-function primeAsin(url: URL): string | null {
-  const fromQuery = url.searchParams.get('asin');
-  if (fromQuery && PRIME_ASIN_RE.test(fromQuery)) return fromQuery.toUpperCase();
-  const match = `${url.pathname}${url.search}`.match(PRIME_ASIN_RE);
-  return match?.[1]?.toUpperCase() ?? null;
+function primeCacheKey(url: string, title?: string): string {
+  return `${url}|${title?.trim() ?? ''}`;
+}
+
+export async function prefetchPrimeGti(url: string, title?: string): Promise<string | null> {
+  const key = primeCacheKey(url, title);
+  if (primeGtiCache.has(key)) return primeGtiCache.get(key) ?? null;
+  const pending = primeGtiPending.get(key);
+  if (pending) return pending;
+
+  const request = (async () => {
+    try {
+      const params = new URLSearchParams();
+      if (url) params.set('url', url);
+      if (title?.trim()) params.set('title', title.trim());
+      const res = await fetch(`${API_URL}/prime/gti?${params}`);
+      if (!res.ok) return null;
+      const data = (await res.json()) as { gti?: string | null };
+      const gti = data.gti && PRIME_GTI_RE.test(data.gti.trim()) ? data.gti.trim() : null;
+      primeGtiCache.set(key, gti);
+      return gti;
+    } catch {
+      return null;
+    } finally {
+      primeGtiPending.delete(key);
+    }
+  })();
+
+  primeGtiPending.set(key, request);
+  return request;
+}
+
+function cachedPrimeGti(url: string, title?: string): string | null {
+  return primeGtiCache.get(primeCacheKey(url, title)) ?? null;
+}
+
+function androidPrimeIntent(webUrl: string, title?: string): string {
+  const gti = cachedPrimeGti(webUrl, title);
+  if (gti) {
+    return `intent://app.primevideo.com/detail?gti=${gti}#Intent;scheme=https;package=${ANDROID_PACKAGES.prime};end`;
+  }
+  return PRIME_LAUNCH_INTENT;
 }
 
 function primeCatalogId(url: URL): string | null {
-  const gti = url.searchParams.get('gti');
-  if (gti) return gti;
   const parts = url.pathname.split('/').filter(Boolean);
   const detailIdx = parts.findIndex((p) => p.toLowerCase() === 'detail');
   if (detailIdx < 0) return null;
@@ -58,26 +97,6 @@ function primeCatalogId(url: URL): string | null {
     if (PRIME_CATALOG_ID_RE.test(seg)) return seg;
   }
   return null;
-}
-
-function androidPrimeIntent(webUrl: string): string {
-  const url = parseUrl(webUrl);
-  if (!url) return PRIME_LAUNCH_INTENT;
-
-  const asin = primeAsin(url);
-  if (asin) {
-    return `intent://app.primevideo.com/detail?asin=${asin}#Intent;scheme=https;package=${ANDROID_PACKAGES.prime};end`;
-  }
-
-  const id = primeCatalogId(url);
-  if (id?.startsWith('amzn1.dv.gti.')) {
-    return `intent://app.primevideo.com/detail?gti=${encodeURIComponent(id)}#Intent;scheme=https;package=${ANDROID_PACKAGES.prime};end`;
-  }
-  if (id) {
-    return `intent://app.primevideo.com/detail/${id}#Intent;scheme=https;package=${ANDROID_PACKAGES.prime};end`;
-  }
-
-  return PRIME_LAUNCH_INTENT;
 }
 
 function primeEuFallback(url: URL): string {
@@ -143,11 +162,8 @@ function iosSchemeUrl(webUrl: string, target: AppTarget): string | null {
   if (target === 'netflix') return `nflx://${rest}`;
   if (target === 'crunchyroll') return `crunchyroll://${rest}`;
   if (target === 'prime') {
-    const asin = primeAsin(url);
-    if (asin) return `aiv://aiv/watch?asin=${asin}`;
-    const id = primeCatalogId(url);
-    if (id?.startsWith('amzn1.dv.gti.')) return `aiv://aiv/watch?gti=${encodeURIComponent(id)}`;
-    if (id) return `aiv://app.primevideo.com/detail/${id}`;
+    const gti = cachedPrimeGti(webUrl, undefined);
+    if (gti) return `aiv://aiv/detail?gti=${gti}`;
     return 'aiv://';
   }
   if (target === 'disney') return `disneyplus://${rest}`;
@@ -163,7 +179,7 @@ function openWithAppFallback(href: string, fallbackUrl: string): void {
   }, 900);
 }
 
-export function openInNativeApp(webUrl: string, site?: string): void {
+export function openInNativeApp(webUrl: string, site?: string, title?: string): void {
   const target = streamingAppTarget(webUrl, site);
   if (!target) {
     window.open(webUrl, '_blank', 'noopener,noreferrer');
@@ -175,7 +191,7 @@ export function openInNativeApp(webUrl: string, site?: string): void {
 
   if (isAndroid()) {
     if (target === 'prime') {
-      window.location.href = androidPrimeIntent(webUrl);
+      window.location.href = androidPrimeIntent(webUrl, title);
       return;
     }
     window.location.href = androidIntentUrl(webUrl, target);
@@ -183,12 +199,18 @@ export function openInNativeApp(webUrl: string, site?: string): void {
   }
 
   if (isIOS()) {
-    const scheme = iosSchemeUrl(webUrl, target);
-    if (!scheme) {
-      window.open(target === 'prime' ? primeFallback : webUrl, '_blank', 'noopener,noreferrer');
+    if (target === 'prime') {
+      const gti = cachedPrimeGti(webUrl, title);
+      const scheme = gti ? `aiv://aiv/detail?gti=${gti}` : 'aiv://';
+      openWithAppFallback(scheme, primeFallback);
       return;
     }
-    openWithAppFallback(scheme, target === 'prime' ? primeFallback : webUrl);
+    const scheme = iosSchemeUrl(webUrl, target);
+    if (!scheme) {
+      window.open(webUrl, '_blank', 'noopener,noreferrer');
+      return;
+    }
+    openWithAppFallback(scheme, webUrl);
     return;
   }
 

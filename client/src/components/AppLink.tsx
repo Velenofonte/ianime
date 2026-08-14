@@ -1,23 +1,30 @@
-import type { MouseEvent, ReactNode } from 'react';
-import { openInNativeApp, streamingAppTarget } from '../services/appLinks';
+import { useEffect, type MouseEvent, type ReactNode } from 'react';
+import { openInNativeApp, prefetchPrimeGti, streamingAppTarget } from '../services/appLinks';
 
 export function AppLink({
   href,
   site,
+  title,
   className,
   children,
 }: {
   href: string;
   site?: string;
+  title?: string;
   className?: string;
   children: ReactNode;
 }) {
-  const opensApp = !!streamingAppTarget(href, site);
+  const target = streamingAppTarget(href, site);
+  const opensApp = !!target;
+
+  useEffect(() => {
+    if (target === 'prime') void prefetchPrimeGti(href, title);
+  }, [target, href, title]);
 
   const onClick = (event: MouseEvent<HTMLAnchorElement>) => {
     if (!opensApp) return;
     event.preventDefault();
-    openInNativeApp(href, site);
+    openInNativeApp(href, site, title);
   };
 
   return (

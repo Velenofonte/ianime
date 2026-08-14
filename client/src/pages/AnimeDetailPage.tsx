@@ -90,7 +90,7 @@ function mergeRelatedNews(italian: NewsArticle[], english: NewsArticle[], limit 
   return merged;
 }
 
-function StreamingLinks({ links }: { links: StreamingLink[] }) {
+function StreamingLinks({ links, title }: { links: StreamingLink[]; title: string }) {
   if (!links.length) return null;
 
   return (
@@ -104,6 +104,7 @@ function StreamingLinks({ links }: { links: StreamingLink[] }) {
               key={link.url}
               href={link.url}
               site={link.site}
+              title={title}
               className={`rounded-lg border px-3 py-1.5 text-sm transition ${
                 isItalian
                   ? 'border-accent/40 bg-accent/10 text-accent-light hover:border-accent'
@@ -293,7 +294,7 @@ export function AnimeDetailPage() {
             </div>
           )}
 
-          <StreamingLinks links={anime.streamingLinks} />
+          <StreamingLinks links={anime.streamingLinks} title={anime.title} />
 
           {anime.italianPlatforms.length > 0 && !anime.streamingLinks.length && (
             <div>
