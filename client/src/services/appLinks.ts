@@ -37,7 +37,8 @@ function youtubeWatchUrl(url: URL): URL {
 const PRIME_ASIN_RE = /\b(B[0-9A-Z]{9})\b/i;
 const PRIME_CATALOG_ID_RE = /\b(0[0-9A-Z]{15,})\b/;
 const PRIME_EU_WEB = 'https://www.primevideo.com/region/eu/';
-const PRIME_LAUNCH_INTENT = `intent://app.primevideo.com#Intent;scheme=https;package=${ANDROID_PACKAGES.prime};end`;
+/** /home è nell'intent-filter; app.primevideo.com senza path manda al Play Store. */
+const PRIME_LAUNCH_INTENT = `intent://app.primevideo.com/home#Intent;scheme=https;package=${ANDROID_PACKAGES.prime};end`;
 
 function primeAsin(url: URL): string | null {
   const fromQuery = url.searchParams.get('asin');
@@ -68,31 +69,6 @@ function primeEuFallback(url: URL): string {
   const id = primeCatalogId(url);
   if (id && !id.startsWith('amzn1.')) return `${PRIME_EU_WEB}detail/${id}`;
   return PRIME_EU_WEB;
-}
-
-function androidPrimeIntent(webUrl: string): { href: string; tryLauncher: boolean } {
-  const url = parseUrl(webUrl);
-  if (!url || isUsAmazonHost(url)) {
-    return { href: PRIME_LAUNCH_INTENT, tryLauncher: false };
-  }
-
-  const asin = primeAsin(url);
-  if (asin) {
-    return {
-      href: `intent://app.primevideo.com/detail?asin=${asin}#Intent;scheme=https;package=${ANDROID_PACKAGES.prime};end`,
-      tryLauncher: true,
-    };
-  }
-
-  const gti = primeCatalogId(url);
-  if (gti) {
-    return {
-      href: `intent://app.primevideo.com/detail?gti=${encodeURIComponent(gti)}#Intent;scheme=https;package=${ANDROID_PACKAGES.prime};end`,
-      tryLauncher: true,
-    };
-  }
-
-  return { href: PRIME_LAUNCH_INTENT, tryLauncher: false };
 }
 
 function siteAppTarget(site?: string): AppTarget | null {
@@ -163,15 +139,11 @@ function iosSchemeUrl(webUrl: string, target: AppTarget): string | null {
   return null;
 }
 
-function openWithAppFallback(href: string, fallbackUrl: string, alsoTryLauncher = false): void {
+function openWithAppFallback(href: string, fallbackUrl: string): void {
   const started = Date.now();
   window.location.href = href;
   window.setTimeout(() => {
     if (document.hidden || Date.now() - started >= 2000) return;
-    if (alsoTryLauncher) {
-      window.location.href = PRIME_LAUNCH_INTENT;
-      return;
-    }
     window.open(fallbackUrl, '_blank', 'noopener,noreferrer');
   }, 900);
 }
@@ -188,12 +160,7 @@ export function openInNativeApp(webUrl: string, site?: string): void {
 
   if (isAndroid()) {
     if (target === 'prime') {
-      const { href, tryLauncher } = androidPrimeIntent(webUrl);
-      if (tryLauncher) {
-        openWithAppFallback(href, primeFallback, true);
-        return;
-      }
-      window.location.href = href;
+      window.location.href = PRIME_LAUNCH_INTENT;
       return;
     }
     window.location.href = androidIntentUrl(webUrl, target);
