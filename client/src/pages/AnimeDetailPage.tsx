@@ -103,6 +103,7 @@ function StreamingLinks({ links }: { links: StreamingLink[] }) {
             <AppLink
               key={link.url}
               href={link.url}
+              site={link.site}
               className={`rounded-lg border px-3 py-1.5 text-sm transition ${
                 isItalian
                   ? 'border-accent/40 bg-accent/10 text-accent-light hover:border-accent'

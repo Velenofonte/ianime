@@ -3,19 +3,21 @@ import { openInNativeApp, streamingAppTarget } from '../services/appLinks';
 
 export function AppLink({
   href,
+  site,
   className,
   children,
 }: {
   href: string;
+  site?: string;
   className?: string;
   children: ReactNode;
 }) {
-  const opensApp = !!streamingAppTarget(href);
+  const opensApp = !!streamingAppTarget(href, site);
 
   const onClick = (event: MouseEvent<HTMLAnchorElement>) => {
     if (!opensApp) return;
     event.preventDefault();
-    openInNativeApp(href);
+    openInNativeApp(href, site);
   };
 
   return (

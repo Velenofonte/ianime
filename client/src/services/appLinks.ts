@@ -95,7 +95,21 @@ function androidPrimeIntent(webUrl: string): { href: string; tryLauncher: boolea
   return { href: PRIME_LAUNCH_INTENT, tryLauncher: false };
 }
 
-export function streamingAppTarget(rawUrl: string): AppTarget | null {
+function siteAppTarget(site?: string): AppTarget | null {
+  if (!site) return null;
+  const s = site.toLowerCase();
+  if (s.includes('prime') || (s.includes('amazon') && s.includes('video'))) return 'prime';
+  if (s.includes('netflix')) return 'netflix';
+  if (s.includes('crunchyroll')) return 'crunchyroll';
+  if (s.includes('disney')) return 'disney';
+  if (s.includes('youtube')) return 'youtube';
+  return null;
+}
+
+export function streamingAppTarget(rawUrl: string, site?: string): AppTarget | null {
+  const fromSite = siteAppTarget(site);
+  if (fromSite) return fromSite;
+
   const url = parseUrl(rawUrl);
   if (!url || (url.protocol !== 'https:' && url.protocol !== 'http:')) return null;
 
@@ -107,7 +121,9 @@ export function streamingAppTarget(rawUrl: string): AppTarget | null {
   if (host === 'primevideo.com' || host.endsWith('.primevideo.com')) return 'prime';
   if (host === 'disneyplus.com' || host.endsWith('.disneyplus.com')) return 'disney';
   if (host === 'amazon.com' || host.endsWith('.amazon.com') || /^amazon\.[a-z.]{2,}$/.test(host)) {
-    if (/primevideo|\/gp\/video|watch\.amazon/i.test(`${url.hostname}${url.pathname}`)) return 'prime';
+    if (/primevideo|\/gp\/video|\/gp\/product|\/dp\/|watch\.amazon/i.test(`${url.hostname}${url.pathname}`)) {
+      return 'prime';
+    }
   }
   return null;
 }
@@ -160,8 +176,8 @@ function openWithAppFallback(href: string, fallbackUrl: string, alsoTryLauncher 
   }, 900);
 }
 
-export function openInNativeApp(webUrl: string): void {
-  const target = streamingAppTarget(webUrl);
+export function openInNativeApp(webUrl: string, site?: string): void {
+  const target = streamingAppTarget(webUrl, site);
   if (!target) {
     window.open(webUrl, '_blank', 'noopener,noreferrer');
     return;
