@@ -36,6 +36,8 @@ function youtubeWatchUrl(url: URL): URL {
 
 const PRIME_ASIN_RE = /\b(B[0-9A-Z]{9})\b/i;
 const PRIME_CATALOG_ID_RE = /\b(0[0-9A-Z]{15,})\b/;
+const PRIME_EU_WEB = 'https://www.primevideo.com/region/eu/';
+const PRIME_LAUNCH_INTENT = `intent://app.primevideo.com#Intent;scheme=https;package=${ANDROID_PACKAGES.prime};end`;
 
 function primeAsin(url: URL): string | null {
   const fromQuery = url.searchParams.get('asin');
@@ -57,21 +59,40 @@ function primeCatalogId(url: URL): string | null {
   return null;
 }
 
-/** L'app Prime non gestisce www.primevideo.com: serve app.primevideo.com. */
-function primeAppUrl(url: URL): URL {
-  const asin = primeAsin(url);
-  if (asin) return new URL(`https://app.primevideo.com/detail?asin=${asin}`);
+function isUsAmazonHost(url: URL): boolean {
+  const host = url.hostname.replace(/^www\./, '').replace(/^m\./, '').toLowerCase();
+  return host === 'amazon.com' || host.endsWith('.amazon.com');
+}
+
+function primeEuFallback(url: URL): string {
   const id = primeCatalogId(url);
-  if (id) {
-    if (id.startsWith('amzn1.dv.gti.')) {
-      return new URL(`https://app.primevideo.com/detail?gti=${encodeURIComponent(id)}`);
-    }
-    return new URL(`https://app.primevideo.com/detail/${id}`);
+  if (id && !id.startsWith('amzn1.')) return `${PRIME_EU_WEB}detail/${id}`;
+  return PRIME_EU_WEB;
+}
+
+function androidPrimeIntent(webUrl: string): { href: string; tryLauncher: boolean } {
+  const url = parseUrl(webUrl);
+  if (!url || isUsAmazonHost(url)) {
+    return { href: PRIME_LAUNCH_INTENT, tryLauncher: false };
   }
-  const next = new URL(url.toString());
-  next.hostname = 'app.primevideo.com';
-  next.pathname = next.pathname.replace(/^\/region\/[^/]+/i, '').replace(/^\/-\/[^/]+/, '') || '/';
-  return next;
+
+  const asin = primeAsin(url);
+  if (asin) {
+    return {
+      href: `intent://app.primevideo.com/detail?asin=${asin}#Intent;scheme=https;package=${ANDROID_PACKAGES.prime};end`,
+      tryLauncher: true,
+    };
+  }
+
+  const gti = primeCatalogId(url);
+  if (gti) {
+    return {
+      href: `intent://app.primevideo.com/detail?gti=${encodeURIComponent(gti)}#Intent;scheme=https;package=${ANDROID_PACKAGES.prime};end`,
+      tryLauncher: true,
+    };
+  }
+
+  return { href: PRIME_LAUNCH_INTENT, tryLauncher: false };
 }
 
 export function streamingAppTarget(rawUrl: string): AppTarget | null {
@@ -95,10 +116,9 @@ function androidIntentUrl(webUrl: string, target: AppTarget): string {
   let url = parseUrl(webUrl);
   if (!url) return webUrl;
   if (target === 'youtube') url = youtubeWatchUrl(url);
-  if (target === 'prime') url = primeAppUrl(url);
 
   const hostAndPath = `${url.host}${url.pathname}${url.search}`;
-  const fallback = encodeURIComponent(webUrl);
+  const fallback = encodeURIComponent(url.toString());
   const scheme = url.protocol.replace(':', '');
   return `intent://${hostAndPath}#Intent;scheme=${scheme};package=${ANDROID_PACKAGES[target]};S.browser_fallback_url=${fallback};end`;
 }
@@ -116,13 +136,28 @@ function iosSchemeUrl(webUrl: string, target: AppTarget): string | null {
   if (target === 'netflix') return `nflx://${rest}`;
   if (target === 'crunchyroll') return `crunchyroll://${rest}`;
   if (target === 'prime') {
+    if (isUsAmazonHost(url)) return 'aiv://';
     const asin = primeAsin(url);
     if (asin) return `aiv://aiv/watch?asin=${asin}`;
-    const primed = primeAppUrl(url);
-    return `aiv://${primed.host}${primed.pathname}${primed.search}`;
+    const gti = primeCatalogId(url);
+    if (gti) return `aiv://aiv/watch?gti=${encodeURIComponent(gti)}`;
+    return 'aiv://';
   }
   if (target === 'disney') return `disneyplus://${rest}`;
   return null;
+}
+
+function openWithAppFallback(href: string, fallbackUrl: string, alsoTryLauncher = false): void {
+  const started = Date.now();
+  window.location.href = href;
+  window.setTimeout(() => {
+    if (document.hidden || Date.now() - started >= 2000) return;
+    if (alsoTryLauncher) {
+      window.location.href = PRIME_LAUNCH_INTENT;
+      return;
+    }
+    window.open(fallbackUrl, '_blank', 'noopener,noreferrer');
+  }, 900);
 }
 
 export function openInNativeApp(webUrl: string): void {
@@ -132,7 +167,19 @@ export function openInNativeApp(webUrl: string): void {
     return;
   }
 
+  const parsed = parseUrl(webUrl);
+  const primeFallback = parsed ? primeEuFallback(parsed) : PRIME_EU_WEB;
+
   if (isAndroid()) {
+    if (target === 'prime') {
+      const { href, tryLauncher } = androidPrimeIntent(webUrl);
+      if (tryLauncher) {
+        openWithAppFallback(href, primeFallback, true);
+        return;
+      }
+      window.location.href = href;
+      return;
+    }
     window.location.href = androidIntentUrl(webUrl, target);
     return;
   }
@@ -140,18 +187,12 @@ export function openInNativeApp(webUrl: string): void {
   if (isIOS()) {
     const scheme = iosSchemeUrl(webUrl, target);
     if (!scheme) {
-      window.open(webUrl, '_blank', 'noopener,noreferrer');
+      window.open(target === 'prime' ? primeFallback : webUrl, '_blank', 'noopener,noreferrer');
       return;
     }
-    const started = Date.now();
-    window.location.href = scheme;
-    window.setTimeout(() => {
-      if (!document.hidden && Date.now() - started < 2000) {
-        window.open(webUrl, '_blank', 'noopener,noreferrer');
-      }
-    }, 900);
+    openWithAppFallback(scheme, target === 'prime' ? primeFallback : webUrl);
     return;
   }
 
-  window.open(webUrl, '_blank', 'noopener,noreferrer');
+  window.open(target === 'prime' ? primeFallback : webUrl, '_blank', 'noopener,noreferrer');
 }
