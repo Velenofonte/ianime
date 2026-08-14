@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { AnimeCard } from '../components/AnimeCard';
 import { FilterBar } from '../components/FilterBar';
 import { SkeletonGrid } from '../components/Skeleton';
+import { useScrollRestoration } from '../hooks/useScrollRestoration';
 import {
   collapseFranchises,
   fetchTrendingAnime,
@@ -10,6 +11,8 @@ import {
   MIN_VISIBLE_RESULTS,
 } from '../services/anilist';
 import { useFilterStore } from '../store/filters';
+
+const HOME_STALE_MS = 30 * 60 * 1000;
 
 function LoadMoreIndicator({ loading }: { loading: boolean }) {
   if (!loading) {
@@ -35,6 +38,9 @@ export function HomePage() {
   const [debouncedSearch, setDebouncedSearch] = useState(filters.search);
   const sentinelRef = useRef<HTMLDivElement>(null);
   const wasFetchingRef = useRef(false);
+  const isFirstFilterEffect = useRef(true);
+
+  useScrollRestoration('home');
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(filters.search), 400);
@@ -77,19 +83,28 @@ export function HomePage() {
       }),
     initialPageParam: 1,
     getNextPageParam: (last, pages) => (last.hasNextPage ? pages.length + 1 : undefined),
-    staleTime: 300000,
+    staleTime: HOME_STALE_MS,
+    gcTime: HOME_STALE_MS,
+    refetchOnMount: false,
   });
 
+  const filterViewKey = `${queryKey.join('|')}|${filters.airingDay}|${filters.linkIt ? '1' : '0'}`;
+
   useEffect(() => {
+    if (isFirstFilterEffect.current) {
+      isFirstFilterEffect.current = false;
+      return;
+    }
     window.scrollTo({ top: 0 });
-  }, [queryKey]);
+  }, [filterViewKey]);
 
   const needsMoreResults =
     filters.minSeasons > 0 ||
     !!filters.platform ||
     filters.status === 'FINISHED' ||
     filters.status === 'NOT_YET_RELEASED' ||
-    !!filters.airingDay;
+    !!filters.airingDay ||
+    filters.linkIt;
 
   const allMedia = useMemo(() => {
     const raw = query.data?.pages.flatMap((p) => p.media) ?? [];
@@ -98,9 +113,17 @@ export function HomePage() {
       platform: filters.platform,
       status: filters.status || undefined,
       airingDay: filters.airingDay || undefined,
+      linkIt: filters.linkIt,
     });
     return collapseFranchises(filtered);
-  }, [query.data, filters.minSeasons, filters.platform, filters.status, filters.airingDay]);
+  }, [
+    query.data,
+    filters.minSeasons,
+    filters.platform,
+    filters.status,
+    filters.airingDay,
+    filters.linkIt,
+  ]);
 
   const pageCount = query.data?.pages.length ?? 0;
   const isLoadingMore =
@@ -180,7 +203,12 @@ export function HomePage() {
       )}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         {allMedia.map((anime) => (
-          <AnimeCard key={anime.franchiseKey} anime={anime} />
+          <AnimeCard
+            key={anime.franchiseKey}
+            anime={anime}
+            showItalianNote
+            italianVerified={filters.linkIt}
+          />
         ))}
       </div>
 

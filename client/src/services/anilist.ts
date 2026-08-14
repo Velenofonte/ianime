@@ -8,10 +8,12 @@ import type {
   FranchiseSeason,
   FuzzyDate,
   ItalianAudioStatus,
+  StreamingLink,
   UpcomingSeasonEntry,
 } from '../types/anime';
 import { DAY_MAP, EXCLUDED_GENRES, ITALIAN_PLATFORMS } from '../types/anime';
 import { fetchJikanBroadcast } from './jikan';
+import { loadHiddenSuggestions } from './hiddenSuggestions';
 
 const ANILIST_URL = 'https://graphql.anilist.co';
 
@@ -34,6 +36,7 @@ const MEDIA_FIELDS = `
   startDate { year month day }
   season seasonYear
   nextAiringEpisode { airingAt episode }
+  trailer { id site }
   externalLinks { site url language type }
   relations {
     edges {
@@ -240,6 +243,43 @@ export function matchesPlatform(platforms: string[], filterValue: string): boole
   });
 }
 
+function hasItalianLanguageLink(links: { language: string | null }[]): boolean {
+  return links.some((l) => l.language?.toLowerCase() === 'italian');
+}
+
+function isHttpUrl(url: string): boolean {
+  return url.startsWith('https://') || url.startsWith('http://');
+}
+
+function toStreamingLinks(
+  links: { site: string; url: string; language: string | null; type: string }[]
+): StreamingLink[] {
+  const seen = new Set<string>();
+  const result: StreamingLink[] = [];
+  for (const link of links) {
+    if (!link.url || !isHttpUrl(link.url)) continue;
+    const type = (link.type || '').toUpperCase();
+    if (type && type !== 'STREAMING' && type !== 'INFO') continue;
+    if (seen.has(link.url)) continue;
+    seen.add(link.url);
+    result.push({
+      site: link.site,
+      url: link.url,
+      language: link.language,
+      type: link.type,
+    });
+  }
+  return result;
+}
+
+function trailerWatchUrl(trailer?: { id: string | null; site: string | null } | null): string | null {
+  if (!trailer?.id || !trailer.site) return null;
+  const site = trailer.site.toLowerCase();
+  if (site === 'youtube') return `https://www.youtube.com/watch?v=${trailer.id}`;
+  if (site === 'dailymotion') return `https://www.dailymotion.com/video/${trailer.id}`;
+  return null;
+}
+
 function inferItalianAudio(links: { site: string; language: string | null }[]): ItalianAudioStatus {
   const hasItalianLink = links.some((l) => l.language?.toLowerCase() === 'italian');
   const hasVvvvid = links.some((l) => l.site.toLowerCase().includes('vvvvid'));
@@ -343,7 +383,8 @@ interface RawMedia {
   season?: string | null;
   seasonYear?: number | null;
   averageScore: number | null;
-  nextAiringEpisode: { airingAt: number } | null;
+  nextAiringEpisode: { airingAt: number; episode: number | null } | null;
+  trailer?: { id: string | null; site: string | null } | null;
   externalLinks: { site: string; url: string; language: string | null; type: string }[];
   relations: { edges: { relationType: string; node: RawRelationNode }[] };
 }
@@ -682,6 +723,19 @@ function pickRepresentativeCard(cards: AnimeCard[]): AnimeCard {
   });
 }
 
+function mergeStreamingLinks(cards: AnimeCard[]): StreamingLink[] {
+  const seen = new Set<string>();
+  const result: StreamingLink[] = [];
+  for (const card of cards) {
+    for (const link of card.streamingLinks) {
+      if (seen.has(link.url)) continue;
+      seen.add(link.url);
+      result.push(link);
+    }
+  }
+  return result;
+}
+
 function mergeFranchiseCards(cards: AnimeCard[]): AnimeCard {
   const base = pickRepresentativeCard(cards);
   const seasons = mergeSeasons(cards);
@@ -707,11 +761,15 @@ function mergeFranchiseCards(cards: AnimeCard[]): AnimeCard {
     canonicalSeasonId: canonical.id,
     airingDay: airingCard.airingDay,
     airingTime: airingCard.airingTime,
+    nextEpisode: airingCard.nextEpisode,
     status: airingCard.status,
     statusLabel: statusLabel(airingCard.status),
     startDate: canonical.startDate,
     season: canonical.season,
     seasonYear: canonical.seasonYear,
+    hasItalianLink: cards.some((c) => c.hasItalianLink),
+    streamingLinks: mergeStreamingLinks(cards),
+    trailerUrl: cards.find((c) => c.trailerUrl)?.trailerUrl ?? base.trailerUrl,
   };
 }
 
@@ -743,6 +801,8 @@ export async function normalizeMedia(
     ITALIAN_PLATFORMS.some((ip) => p.toLowerCase().includes(ip.toLowerCase().replace('+', '')))
   );
   const italianAudio = inferItalianAudio(raw.externalLinks);
+  const hasItalianLink = hasItalianLanguageLink(raw.externalLinks);
+  const streamingLinks = toStreamingLinks(raw.externalLinks);
   const franchise = deriveFranchiseFields(raw, seasonsOverride);
 
   let airingDay: string | null = null;
@@ -771,10 +831,14 @@ export async function normalizeMedia(
     statusLabel: statusLabel(raw.status),
     italianAudio,
     italianAudioLabel: italianAudioLabel(italianAudio),
+    hasItalianLink,
     airingDay,
     airingTime,
+    nextEpisode: raw.nextAiringEpisode?.episode ?? null,
+    trailerUrl: trailerWatchUrl(raw.trailer),
     platforms,
     italianPlatforms,
+    streamingLinks,
     averageScore: raw.averageScore ?? null,
     franchiseKey: franchise.franchiseKey,
     franchiseTitle: franchise.franchiseTitle,
@@ -915,18 +979,27 @@ export function buildFavoriteExclusionsFromCards(
   return { excludedIds, excludedSlugs };
 }
 
+function mergeHiddenIntoExclusions(base: FavoriteExclusions): FavoriteExclusions {
+  const hidden = loadHiddenSuggestions();
+  const excludedIds = new Set(base.excludedIds);
+  const excludedSlugs = new Set(base.excludedSlugs);
+  for (const id of hidden.ids) excludedIds.add(id);
+  for (const slug of hidden.slugs) excludedSlugs.add(slug);
+  return { excludedIds, excludedSlugs };
+}
+
 export async function loadFavoriteExclusions(
   favoriteIds: number[],
   prefetchedCards?: AnimeCard[]
 ): Promise<FavoriteExclusions> {
   const key = [...favoriteIds].sort((a, b) => a - b).join(',');
   const cached = favoriteExclusionCache.get(key);
-  if (cached) return cached;
+  if (cached) return mergeHiddenIntoExclusions(cached);
 
   const cardSource = prefetchedCards ?? (await fetchAnimeByIds(favoriteIds, { skipJikan: true }));
   const result = buildFavoriteExclusionsFromCards(favoriteIds, cardSource);
   favoriteExclusionCache.set(key, result);
-  return result;
+  return mergeHiddenIntoExclusions(result);
 }
 
 function isExcludedFromSuggestions(card: AnimeCard, exclusions: FavoriteExclusions): boolean {
@@ -943,16 +1016,74 @@ function mergeRecommendationScores(
   }
 }
 
+function mergeRecommendationSources(
+  target: Map<number, Map<number, number>>,
+  source: Map<number, Map<number, number>>
+): void {
+  for (const [recId, bySource] of source) {
+    let dest = target.get(recId);
+    if (!dest) {
+      dest = new Map();
+      target.set(recId, dest);
+    }
+    for (const [sourceId, rating] of bySource) {
+      dest.set(sourceId, (dest.get(sourceId) ?? 0) + rating);
+    }
+  }
+}
+
+export function favoriteTitleMap(cards: AnimeCard[] | undefined): Map<number, string> {
+  const titles = new Map<number, string>();
+  if (!cards) return titles;
+  for (const card of cards) {
+    titles.set(card.id, card.franchiseTitle);
+    titles.set(card.canonicalSeasonId, card.franchiseTitle);
+    for (const season of card.seasons) {
+      titles.set(season.id, card.franchiseTitle);
+    }
+  }
+  return titles;
+}
+
+export function attachRecommendationReasons(
+  cards: AnimeCard[],
+  sources: Map<number, Map<number, number>>,
+  favoriteTitles: Map<number, string>
+): AnimeCard[] {
+  return cards.map((card) => {
+    const combined = new Map<number, number>();
+    for (const id of seasonIdsForCard(card)) {
+      const bySource = sources.get(id);
+      if (!bySource) continue;
+      for (const [sourceId, rating] of bySource) {
+        combined.set(sourceId, (combined.get(sourceId) ?? 0) + rating);
+      }
+    }
+    const names: string[] = [];
+    const seen = new Set<string>();
+    for (const [sourceId] of [...combined.entries()].sort((a, b) => b[1] - a[1])) {
+      const title = favoriteTitles.get(sourceId);
+      if (!title || seen.has(title)) continue;
+      seen.add(title);
+      names.push(title);
+      if (names.length >= 3) break;
+    }
+    return names.length ? { ...card, recommendedBecause: names } : card;
+  });
+}
+
 function scoresFromRecommendationResponse(
   mediaList: {
+    id: number;
     recommendations: {
       pageInfo: { hasNextPage: boolean };
       edges: RawRecommendationEdge[];
     };
   }[],
   exclusions: FavoriteExclusions
-): { scores: Map<number, number>; hasNextPage: boolean } {
+): { scores: Map<number, number>; sources: Map<number, Map<number, number>>; hasNextPage: boolean } {
   const scores = new Map<number, number>();
+  const sources = new Map<number, Map<number, number>>();
   let hasNextPage = false;
 
   for (const media of mediaList) {
@@ -967,17 +1098,24 @@ function scoresFromRecommendationResponse(
 
       const rating = edge.node.rating ?? 0;
       scores.set(rec.id, (scores.get(rec.id) ?? 0) + rating);
+
+      let bySource = sources.get(rec.id);
+      if (!bySource) {
+        bySource = new Map();
+        sources.set(rec.id, bySource);
+      }
+      bySource.set(media.id, (bySource.get(media.id) ?? 0) + rating);
     }
   }
 
-  return { scores, hasNextPage };
+  return { scores, sources, hasNextPage };
 }
 
 async function fetchRecommendationScoresChunk(
   sourceIds: number[],
   recPage: number,
   exclusions: FavoriteExclusions
-): Promise<{ scores: Map<number, number>; hasNextPage: boolean }> {
+): Promise<{ scores: Map<number, number>; sources: Map<number, Map<number, number>>; hasNextPage: boolean }> {
   const query = `
     query ($ids: [Int], $recPage: Int) {
       Page(perPage: 50) {
@@ -1020,29 +1158,43 @@ export async function fetchRecommendationScoresBatched(
   sourceIds: number[],
   recPage: number,
   exclusions: FavoriteExclusions,
-  onBatchComplete?: (partial: { scores: Map<number, number>; hasNextPage: boolean }) => void | Promise<void>
-): Promise<{ scores: Map<number, number>; hasNextPage: boolean }> {
+  onBatchComplete?: (partial: {
+    scores: Map<number, number>;
+    sources: Map<number, Map<number, number>>;
+    hasNextPage: boolean;
+  }) => void | Promise<void>
+): Promise<{
+  scores: Map<number, number>;
+  sources: Map<number, Map<number, number>>;
+  hasNextPage: boolean;
+}> {
   const totalScores = new Map<number, number>();
+  const totalSources = new Map<number, Map<number, number>>();
   let hasNextPage = false;
 
   for (let i = 0; i < sourceIds.length; i += RECOMMENDATION_SOURCE_BATCH_SIZE) {
     if (i > 0) await sleep(ANILIST_BATCH_DELAY_MS);
 
     const chunk = sourceIds.slice(i, i + RECOMMENDATION_SOURCE_BATCH_SIZE);
-    const { scores, hasNextPage: chunkHasNext } = await fetchRecommendationScoresChunk(
+    const { scores, sources, hasNextPage: chunkHasNext } = await fetchRecommendationScoresChunk(
       chunk,
       recPage,
       exclusions
     );
 
     mergeRecommendationScores(totalScores, scores);
+    mergeRecommendationSources(totalSources, sources);
     hasNextPage = hasNextPage || chunkHasNext;
     if (onBatchComplete) {
-      await onBatchComplete({ scores: new Map(totalScores), hasNextPage });
+      await onBatchComplete({
+        scores: new Map(totalScores),
+        sources: totalSources,
+        hasNextPage,
+      });
     }
   }
 
-  return { scores: totalScores, hasNextPage };
+  return { scores: totalScores, sources: totalSources, hasNextPage };
 }
 
 export function rankRecommendationIds(scores: Map<number, number>): number[] {
@@ -1082,7 +1234,7 @@ export async function fetchRecommendationsPage(
   const sourceIds = favoriteIds.slice(0, RECOMMENDATION_SOURCE_MAX);
   const exclusions = await loadFavoriteExclusions(favoriteIds, options?.prefetchedFavoriteCards);
 
-  const { scores, hasNextPage } = await fetchRecommendationScoresBatched(sourceIds, recPage, exclusions);
+  const { scores, sources, hasNextPage } = await fetchRecommendationScoresBatched(sourceIds, recPage, exclusions);
   const rankedIds = rankRecommendationIds(scores);
 
   if (!rankedIds.length) {
@@ -1094,7 +1246,8 @@ export async function fetchRecommendationsPage(
   const cards = collapseFranchises(await fetchAnimeByIds(rankedIds, { skipJikan: true })).filter(
     (card) => !isExcludedFromSuggestions(card, exclusions)
   );
-  return { media: cards, hasNextPage };
+  const titles = favoriteTitleMap(options?.prefetchedFavoriteCards);
+  return { media: attachRecommendationReasons(cards, sources, titles), hasNextPage };
 }
 
 const SEASON_MONTH: Record<string, number> = {
@@ -1250,6 +1403,7 @@ export function filterAnimeClientSide(
     platform: string;
     status?: AnimeStatus | '';
     airingDay?: string;
+    linkIt?: boolean;
   }
 ): AnimeCard[] {
   return media.filter((a) => {
@@ -1263,6 +1417,7 @@ export function filterAnimeClientSide(
       if (a.franchiseStatus !== 'RELEASING') return false;
       if (!matchesAiringDay(a, filters.airingDay)) return false;
     }
+    if (filters.linkIt && !a.hasItalianLink) return false;
     return true;
   });
 }

@@ -29,6 +29,13 @@ export interface UpcomingSeasonEntry {
   sortKey: number;
 }
 
+export interface StreamingLink {
+  site: string;
+  url: string;
+  language: string | null;
+  type: string;
+}
+
 export interface AnimeCard {
   id: number;
   idMal: number | null;
@@ -43,10 +50,14 @@ export interface AnimeCard {
   statusLabel: string;
   italianAudio: ItalianAudioStatus;
   italianAudioLabel: string;
+  hasItalianLink: boolean;
   airingDay: string | null;
   airingTime: string | null;
+  nextEpisode: number | null;
+  trailerUrl: string | null;
   platforms: string[];
   italianPlatforms: string[];
+  streamingLinks: StreamingLink[];
   averageScore: number | null;
   franchiseKey: string;
   franchiseTitle: string;
@@ -60,6 +71,7 @@ export interface AnimeCard {
   startDate: FuzzyDate | null;
   season: string | null;
   seasonYear: number | null;
+  recommendedBecause?: string[];
 }
 
 export const WEEK_DAYS = [
@@ -83,6 +95,7 @@ export interface AnimeFilters {
   minStars: number;
   platform: string;
   airingDay: '' | WeekDay;
+  linkIt: boolean;
 }
 
 export interface NewsArticle {

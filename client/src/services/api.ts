@@ -53,4 +53,24 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ anilist_id: anilistId, text }),
     }),
+  getItalyNews: (options: { q?: string; offset?: number; limit?: number } = {}) => {
+    const params = new URLSearchParams();
+    if (options.q) params.set('q', options.q);
+    if (options.offset) params.set('offset', String(options.offset));
+    if (options.limit) params.set('limit', String(options.limit));
+    const query = params.toString();
+    return request<{
+      articles: {
+        title: string;
+        slug: string;
+        source: string;
+        excerpt: string;
+        date: string;
+        image: string;
+        link: string;
+      }[];
+      hasMore: boolean;
+      nextOffset: number | null;
+    }>(`/news/italy${query ? `?${query}` : ''}`);
+  },
 };

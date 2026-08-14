@@ -2,6 +2,8 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FAVORITES_ANIME_QUERY_KEY } from './useFavorites';
 import {
+  attachRecommendationReasons,
+  favoriteTitleMap,
   fetchRecommendationScoresBatched,
   fetchRecommendationsPage,
   hydrateRecommendationCards,
@@ -9,6 +11,7 @@ import {
   rankRecommendationIds,
   scoreForRecommendationCard,
 } from '../services/anilist';
+import { hideSuggestion } from '../services/hiddenSuggestions';
 import type { AnimeCard } from '../types/anime';
 
 const RECOMMENDATIONS_STALE_MS = 30 * 60 * 1000;
@@ -23,7 +26,7 @@ function favoritesKey(ids: number[]): string {
   return [...ids].sort((a, b) => a - b).join(',');
 }
 
-function recommendationsQueryKey(ids: number[]) {
+export function recommendationsQueryKey(ids: number[]) {
   return ['recommendations', favoritesKey(ids)] as const;
 }
 
@@ -49,11 +52,14 @@ function trackHydratedIds(cards: AnimeCard[], hydratedIds: Set<number>): void {
 export function useProgressiveRecommendations(ids: number[]) {
   const qc = useQueryClient();
   const idsKey = useMemo(() => favoritesKey(ids), [ids]);
+  const initialCache = ids.length
+    ? qc.getQueryData<RecommendationsCache>(recommendationsQueryKey(ids))
+    : undefined;
 
-  const [media, setMedia] = useState<AnimeCard[]>([]);
-  const [hasNextPage, setHasNextPage] = useState(false);
-  const [loadedRecPages, setLoadedRecPages] = useState(0);
-  const [isInitialLoading, setIsInitialLoading] = useState(true);
+  const [media, setMedia] = useState<AnimeCard[]>(() => initialCache?.media ?? []);
+  const [hasNextPage, setHasNextPage] = useState(() => initialCache?.hasNextPage ?? false);
+  const [loadedRecPages, setLoadedRecPages] = useState(() => initialCache?.loadedRecPages ?? 0);
+  const [isInitialLoading, setIsInitialLoading] = useState(() => !initialCache);
   const [isAnalyzingFavorites, setIsAnalyzingFavorites] = useState(false);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [error, setError] = useState<Error | null>(null);
@@ -61,8 +67,16 @@ export function useProgressiveRecommendations(ids: number[]) {
   const scoresRef = useRef(new Map<number, number>());
   const hydratedIdsRef = useRef(new Set<number>());
   const runIdRef = useRef(0);
+  const hydratedFromCacheRef = useRef(false);
+
+  if (initialCache && !hydratedFromCacheRef.current) {
+    trackHydratedIds(initialCache.media, hydratedIdsRef.current);
+    hydratedFromCacheRef.current = true;
+  }
 
   const applyCache = useCallback((cached: RecommendationsCache) => {
+    hydratedIdsRef.current = new Set();
+    trackHydratedIds(cached.media, hydratedIdsRef.current);
     setMedia(cached.media);
     setHasNextPage(cached.hasNextPage);
     setLoadedRecPages(cached.loadedRecPages);
@@ -102,6 +116,7 @@ export function useProgressiveRecommendations(ids: number[]) {
     const runId = ++runIdRef.current;
     scoresRef.current = new Map();
     hydratedIdsRef.current = new Set();
+    hydratedFromCacheRef.current = false;
 
     setIsInitialLoading(true);
     setIsAnalyzingFavorites(false);
@@ -117,31 +132,38 @@ export function useProgressiveRecommendations(ids: number[]) {
         if (runId !== runIdRef.current) return;
 
         const sourceIds = ids.slice(0, 50);
+        const titles = favoriteTitleMap(prefetchedCards);
         let hasMore = false;
 
         setIsAnalyzingFavorites(sourceIds.length > 8);
 
-        await fetchRecommendationScoresBatched(sourceIds, 1, exclusions, async ({ scores, hasNextPage: batchHasNext }) => {
-          if (runId !== runIdRef.current) return;
+        await fetchRecommendationScoresBatched(
+          sourceIds,
+          1,
+          exclusions,
+          async ({ scores, sources, hasNextPage: batchHasNext }) => {
+            if (runId !== runIdRef.current) return;
 
-          scoresRef.current = scores;
-          hasMore = hasMore || batchHasNext;
+            scoresRef.current = scores;
+            hasMore = hasMore || batchHasNext;
 
-          const rankedIds = rankRecommendationIds(scores);
-          const newCards = await hydrateRecommendationCards(rankedIds, exclusions, hydratedIdsRef.current);
-          if (runId !== runIdRef.current) return;
+            const rankedIds = rankRecommendationIds(scores);
+            const hydrated = await hydrateRecommendationCards(rankedIds, exclusions, hydratedIdsRef.current);
+            if (runId !== runIdRef.current) return;
 
-          trackHydratedIds(newCards, hydratedIdsRef.current);
+            const newCards = attachRecommendationReasons(hydrated, sources, titles);
+            trackHydratedIds(newCards, hydratedIdsRef.current);
 
-          setMedia((prev) => {
-            const merged = mergeMediaByScore(prev, newCards, scores);
-            persistCache(merged, hasMore, 1);
-            return merged;
-          });
+            setMedia((prev) => {
+              const merged = mergeMediaByScore(prev, newCards, scores);
+              persistCache(merged, hasMore, 1);
+              return merged;
+            });
 
-          if (newCards.length) setIsInitialLoading(false);
-          setIsAnalyzingFavorites(true);
-        });
+            if (newCards.length) setIsInitialLoading(false);
+            setIsAnalyzingFavorites(true);
+          }
+        );
 
         if (runId !== runIdRef.current) return;
 
@@ -192,10 +214,24 @@ export function useProgressiveRecommendations(ids: number[]) {
     }
   }, [ids, isLoadingMore, hasNextPage, loadedRecPages, media, qc, persistCache]);
 
+  const hideCard = useCallback(
+    (card: AnimeCard) => {
+      const relatedIds = card.seasons.length ? card.seasons.map((season) => season.id) : [card.id];
+      hideSuggestion(relatedIds, card.titleSlug);
+      setMedia((prev) => {
+        const next = prev.filter((item) => item.franchiseKey !== card.franchiseKey);
+        persistCache(next, hasNextPage, loadedRecPages);
+        return next;
+      });
+    },
+    [hasNextPage, loadedRecPages, persistCache]
+  );
+
   const refetch = useCallback(() => {
     qc.removeQueries({ queryKey: recommendationsQueryKey(ids) });
     scoresRef.current = new Map();
     hydratedIdsRef.current = new Set();
+    hydratedFromCacheRef.current = false;
     runIdRef.current += 1;
     setIsInitialLoading(true);
     setMedia([]);
@@ -212,23 +248,30 @@ export function useProgressiveRecommendations(ids: number[]) {
         if (runId !== runIdRef.current) return;
 
         const sourceIds = ids.slice(0, 50);
+        const titles = favoriteTitleMap(prefetchedCards);
         let hasMore = false;
 
         setIsAnalyzingFavorites(sourceIds.length > 8);
 
-        await fetchRecommendationScoresBatched(sourceIds, 1, exclusions, async ({ scores, hasNextPage: batchHasNext }) => {
-          if (runId !== runIdRef.current) return;
-          scoresRef.current = scores;
-          hasMore = hasMore || batchHasNext;
+        await fetchRecommendationScoresBatched(
+          sourceIds,
+          1,
+          exclusions,
+          async ({ scores, sources, hasNextPage: batchHasNext }) => {
+            if (runId !== runIdRef.current) return;
+            scoresRef.current = scores;
+            hasMore = hasMore || batchHasNext;
 
-          const rankedIds = rankRecommendationIds(scores);
-          const newCards = await hydrateRecommendationCards(rankedIds, exclusions, hydratedIdsRef.current);
-          if (runId !== runIdRef.current) return;
+            const rankedIds = rankRecommendationIds(scores);
+            const hydrated = await hydrateRecommendationCards(rankedIds, exclusions, hydratedIdsRef.current);
+            if (runId !== runIdRef.current) return;
 
-          trackHydratedIds(newCards, hydratedIdsRef.current);
-          setMedia((prev) => mergeMediaByScore(prev, newCards, scores));
-          if (newCards.length) setIsInitialLoading(false);
-        });
+            const newCards = attachRecommendationReasons(hydrated, sources, titles);
+            trackHydratedIds(newCards, hydratedIdsRef.current);
+            setMedia((prev) => mergeMediaByScore(prev, newCards, scores));
+            if (newCards.length) setIsInitialLoading(false);
+          }
+        );
 
         if (runId !== runIdRef.current) return;
         setHasNextPage(hasMore);
@@ -257,6 +300,7 @@ export function useProgressiveRecommendations(ids: number[]) {
     isError: !!error,
     error,
     fetchNextPage,
+    hideCard,
     refetch,
     staleTime: RECOMMENDATIONS_STALE_MS,
   };

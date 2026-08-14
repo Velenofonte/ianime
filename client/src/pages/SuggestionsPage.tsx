@@ -4,6 +4,7 @@ import { AnimeCard } from '../components/AnimeCard';
 import { SkeletonGrid } from '../components/Skeleton';
 import { useFavorites } from '../hooks/useFavorites';
 import { useProgressiveRecommendations } from '../hooks/useProgressiveRecommendations';
+import { useScrollRestoration } from '../hooks/useScrollRestoration';
 
 function LoadMoreIndicator({ loading }: { loading: boolean }) {
   if (!loading) {
@@ -27,6 +28,8 @@ function LoadMoreIndicator({ loading }: { loading: boolean }) {
 export function SuggestionsPage() {
   const sentinelRef = useRef<HTMLDivElement>(null);
   const wasFetchingRef = useRef(false);
+
+  useScrollRestoration('suggerimenti');
 
   const { ids, isLoading: loadingIds } = useFavorites();
   const query = useProgressiveRecommendations(ids);
@@ -126,7 +129,7 @@ export function SuggestionsPage() {
         <>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {query.media.map((a) => (
-              <AnimeCard key={a.franchiseKey} anime={a} />
+              <AnimeCard key={a.franchiseKey} anime={a} onHide={() => query.hideCard(a)} />
             ))}
           </div>
 

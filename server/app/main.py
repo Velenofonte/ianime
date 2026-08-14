@@ -6,7 +6,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
-from app.routers import auth, descriptions, favorites
+from app.routers import auth, descriptions, favorites, news
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
@@ -23,6 +23,7 @@ app.add_middleware(
 app.include_router(auth.router, prefix="/api")
 app.include_router(favorites.router, prefix="/api")
 app.include_router(descriptions.router, prefix="/api")
+app.include_router(news.router, prefix="/api")
 
 
 @app.get("/api/health")

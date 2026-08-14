@@ -2,9 +2,11 @@ import { Link } from 'react-router-dom';
 import { AnimeCard } from '../components/AnimeCard';
 import { SkeletonGrid } from '../components/Skeleton';
 import { useFavoritesAnime } from '../hooks/useFavorites';
+import { useScrollRestoration } from '../hooks/useScrollRestoration';
 
 export function FavoritesPage() {
   const { ids, franchiseAnime, isLoading } = useFavoritesAnime();
+  useScrollRestoration('preferiti');
 
   if (isLoading) return <SkeletonGrid count={4} />;
 

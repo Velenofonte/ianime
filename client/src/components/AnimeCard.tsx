@@ -2,10 +2,21 @@ import type { AnimeCard as AnimeCardType } from '../types/anime';
 import { Link } from 'react-router-dom';
 import { formatStartDate } from '../services/anilist';
 import { FavoriteButton } from './FavoriteButton';
+import { ItalianVerificationNote } from './ItalianVerificationNote';
 import { PosterImage } from './PosterImage';
 import { StarRating } from './StarRating';
 
-export function AnimeCard({ anime }: { anime: AnimeCardType }) {
+export function AnimeCard({
+  anime,
+  showItalianNote,
+  italianVerified = false,
+  onHide,
+}: {
+  anime: AnimeCardType;
+  showItalianNote?: boolean;
+  italianVerified?: boolean;
+  onHide?: () => void;
+}) {
   const seasonIds = anime.seasons.length ? anime.seasons.map((s) => s.id) : [anime.id];
   const isAiring = anime.franchiseStatus === 'RELEASING';
   const isUpcoming = anime.franchiseStatus === 'NOT_YET_RELEASED';
@@ -29,9 +40,31 @@ export function AnimeCard({ anime }: { anime: AnimeCardType }) {
       <div className="space-y-2 p-4">
         <div className="flex items-start gap-2">
           <h3 className="line-clamp-2 flex-1 font-semibold leading-tight">{anime.franchiseTitle}</h3>
+          {onHide && (
+            <button
+              type="button"
+              aria-label="Non mi interessa"
+              title="Non mi interessa"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onHide();
+              }}
+              className="shrink-0 rounded p-1 text-gray-500 transition-colors hover:bg-surface-hover hover:text-white"
+            >
+              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+                <path d="M18 6L6 18M6 6l12 12" strokeLinecap="round" />
+              </svg>
+            </button>
+          )}
           <FavoriteButton anilistId={anime.canonicalSeasonId} relatedIds={seasonIds} inline />
         </div>
         <StarRating score={anime.averageScore} />
+        {anime.recommendedBecause?.length ? (
+          <p className="text-xs text-accent-light">
+            Consigliato perché ti piace {anime.recommendedBecause.join(', ')}
+          </p>
+        ) : null}
         <div className="flex flex-wrap gap-1">
           {anime.genres.slice(0, 3).map((g) => (
             <span key={g} className="rounded bg-surface-hover px-2 py-0.5 text-xs text-gray-300">{g}</span>
@@ -44,12 +77,14 @@ export function AnimeCard({ anime }: { anime: AnimeCardType }) {
           {isAiring && anime.airingDay && (
             <span className="col-span-2">
               Uscita: {anime.airingDay}{anime.airingTime ? ` ${anime.airingTime}` : ''}
+              {anime.nextEpisode ? ` · ep. ${anime.nextEpisode}` : ''}
             </span>
           )}
           {releaseDateLabel && (
             <span className="col-span-2">Uscita prevista: {releaseDateLabel}</span>
           )}
         </div>
+        {showItalianNote && <ItalianVerificationNote verified={italianVerified} />}
         {anime.italianPlatforms.length > 0 && (
           <div className="flex flex-wrap gap-1 pt-1">
             {anime.italianPlatforms.slice(0, 3).map((p) => (

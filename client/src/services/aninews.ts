@@ -1,9 +1,11 @@
 import type { NewsArticle } from '../types/anime';
+import { api } from './api';
 
 const NEWS_BASE = 'https://aninews.vercel.app';
 
 export const MIN_VISIBLE_NEWS = 10;
 export const MIN_SEARCH_LENGTH = 2;
+export const ITALY_NEWS_SOURCE = 'italy';
 
 export interface NewsPageResult {
   articles: NewsArticle[];
@@ -44,6 +46,9 @@ export async function searchNews(
   query: string,
   options: { limit?: number; source?: string; offset?: number } = {}
 ): Promise<NewsPageResult> {
+  if (options.source === ITALY_NEWS_SOURCE) {
+    return fetchItalyNews({ search: query, limit: options.limit ?? 5, offset: options.offset ?? 0 });
+  }
   const limit = options.limit ?? 5;
   const params = new URLSearchParams({ q: query, limit: String(limit) });
   if (options.source && options.source !== 'all') params.set('source', options.source);
@@ -61,11 +66,34 @@ export async function searchNews(
   };
 }
 
+export async function fetchItalyNews(
+  options: { search?: string; limit?: number; offset?: number } = {}
+): Promise<NewsPageResult> {
+  const result = await api.getItalyNews({
+    q: options.search?.trim() || undefined,
+    limit: options.limit ?? 20,
+    offset: options.offset ?? 0,
+  });
+  return {
+    articles: result.articles,
+    hasMore: result.hasMore,
+    nextOffset: result.nextOffset ?? undefined,
+  };
+}
+
 export async function fetchNewsPage(
   source: string,
   options: { search?: string; pageParam?: string | number }
 ): Promise<NewsPageResult> {
   const q = options.search?.trim() ?? '';
+  if (source === ITALY_NEWS_SOURCE) {
+    const offset = typeof options.pageParam === 'number' ? options.pageParam : 0;
+    return fetchItalyNews({
+      search: q.length >= MIN_SEARCH_LENGTH ? q : undefined,
+      limit: 20,
+      offset,
+    });
+  }
   if (q.length >= MIN_SEARCH_LENGTH) {
     const offset = typeof options.pageParam === 'number' ? options.pageParam : 0;
     return searchNews(q, { limit: 20, source, offset });

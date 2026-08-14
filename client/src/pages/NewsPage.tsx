@@ -2,10 +2,12 @@ import { useInfiniteQuery } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { it } from 'date-fns/locale';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { fetchNewsPage, MIN_SEARCH_LENGTH, MIN_VISIBLE_NEWS } from '../services/aninews';
+import { useScrollRestoration } from '../hooks/useScrollRestoration';
+import { fetchNewsPage, ITALY_NEWS_SOURCE, MIN_SEARCH_LENGTH, MIN_VISIBLE_NEWS } from '../services/aninews';
 
 const SOURCES = [
   { label: 'Tutte', value: 'all' },
+  { label: 'Italia', value: ITALY_NEWS_SOURCE },
   { label: 'Crunchyroll', value: 'crunchyroll' },
   { label: 'ANN', value: 'ann' },
   { label: 'MyAnimeList', value: 'myanimelist' },
@@ -18,6 +20,9 @@ export function NewsPage() {
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const sentinelRef = useRef<HTMLDivElement>(null);
   const wasFetchingRef = useRef(false);
+  const isFirstQueryKeyEffect = useRef(true);
+
+  useScrollRestoration('news');
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(search), 400);
@@ -25,6 +30,7 @@ export function NewsPage() {
   }, [search]);
 
   const isSearchMode = debouncedSearch.trim().length >= MIN_SEARCH_LENGTH;
+  const usesOffsetPagination = isSearchMode || source === ITALY_NEWS_SOURCE;
 
   const queryKey = useMemo(
     () => ['news', source, isSearchMode ? debouncedSearch.trim() : ''] as const,
@@ -35,16 +41,22 @@ export function NewsPage() {
     queryKey,
     queryFn: ({ pageParam }) =>
       fetchNewsPage(source, { search: debouncedSearch, pageParam: pageParam as string | number | undefined }),
-    initialPageParam: isSearchMode ? 0 : (undefined as string | undefined),
+    initialPageParam: usesOffsetPagination ? 0 : (undefined as string | undefined),
     getNextPageParam: (last) => {
       if (!last.hasMore) return undefined;
       if (last.nextOffset !== undefined) return last.nextOffset;
       return last.nextCursor;
     },
     staleTime: 900000,
+    gcTime: 30 * 60 * 1000,
+    refetchOnMount: false,
   });
 
   useEffect(() => {
+    if (isFirstQueryKeyEffect.current) {
+      isFirstQueryKeyEffect.current = false;
+      return;
+    }
     window.scrollTo({ top: 0 });
   }, [queryKey]);
 

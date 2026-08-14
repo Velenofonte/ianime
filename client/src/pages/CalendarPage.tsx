@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { useFavorites } from '../hooks/useFavorites';
+import { useScrollRestoration } from '../hooks/useScrollRestoration';
 import { collectUpcomingSeasons, fetchCalendarAnimeByIds, matchesAiringDay } from '../services/anilist';
 import { WEEK_DAYS } from '../types/anime';
 
@@ -21,12 +22,14 @@ const FAVORITE_ANIME_STALE_MS = 10 * 60 * 1000;
 
 export function CalendarPage() {
   const { ids, isLoading: loadingIds } = useFavorites();
+  useScrollRestoration('calendario');
 
   const { data: anime = [], isLoading: loadingAnime } = useQuery({
     queryKey: ['calendar-anime', ids],
     queryFn: () => fetchCalendarAnimeByIds(ids),
     enabled: ids.length > 0,
     staleTime: FAVORITE_ANIME_STALE_MS,
+    refetchOnMount: false,
   });
 
   const upcoming = useMemo(() => collectUpcomingSeasons(anime), [anime]);

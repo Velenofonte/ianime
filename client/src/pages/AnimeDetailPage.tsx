@@ -1,23 +1,33 @@
 import { useQuery } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { it } from 'date-fns/locale';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { FavoriteButton } from '../components/FavoriteButton';
 import { AnimeDescription } from '../components/AnimeDescription';
+import { ItalianVerificationNote } from '../components/ItalianVerificationNote';
 import { PosterImage } from '../components/PosterImage';
 import { StarRating } from '../components/StarRating';
-import { searchNews } from '../services/aninews';
+import { fetchItalyNews, searchNews } from '../services/aninews';
 import { fetchAnimeById, formatStartDate, seasonStatusLabel } from '../services/anilist';
-import type { AnimeCard, FranchiseSeason } from '../types/anime';
+import type { AnimeCard, FranchiseSeason, NewsArticle, StreamingLink } from '../types/anime';
 
 function BackLink() {
+  const navigate = useNavigate();
+
   return (
-    <Link
-      to="/"
+    <button
+      type="button"
+      onClick={() => {
+        if (window.history.length > 1) {
+          navigate(-1);
+          return;
+        }
+        navigate('/');
+      }}
       className="mb-6 inline-flex items-center text-sm text-gray-400 transition hover:text-accent-light"
     >
       ← Torna indietro
-    </Link>
+    </button>
   );
 }
 
@@ -66,6 +76,51 @@ function upcomingDateSource(anime: AnimeCard, displaySeason: FranchiseSeason | n
   return anime;
 }
 
+function mergeRelatedNews(italian: NewsArticle[], english: NewsArticle[], limit = 8): NewsArticle[] {
+  const seen = new Set<string>();
+  const merged: NewsArticle[] = [];
+  for (const article of [...italian, ...english]) {
+    const key = article.link || article.slug;
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    merged.push(article);
+    if (merged.length >= limit) break;
+  }
+  return merged;
+}
+
+function StreamingLinks({ links }: { links: StreamingLink[] }) {
+  if (!links.length) return null;
+
+  return (
+    <div>
+      <p className="mb-2 text-sm font-medium text-gray-300">Guarda su</p>
+      <div className="flex flex-wrap gap-2">
+        {links.map((link) => {
+          const isItalian = link.language?.toLowerCase() === 'italian';
+          return (
+            <a
+              key={link.url}
+              href={link.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={`rounded-lg border px-3 py-1.5 text-sm transition ${
+                isItalian
+                  ? 'border-accent/40 bg-accent/10 text-accent-light hover:border-accent'
+                  : 'border-white/10 bg-surface-card text-gray-300 hover:border-accent/30'
+              }`}
+            >
+              {link.site}
+              {isItalian ? ' · IT' : ''}
+            </a>
+          );
+        })}
+      </div>
+      <p className="mt-2 text-xs text-gray-500">Le piattaforme sono indicative, non filtrate per l’Italia.</p>
+    </div>
+  );
+}
+
 export function AnimeDetailPage() {
   const { id } = useParams<{ id: string }>();
   const animeId = Number(id);
@@ -82,9 +137,17 @@ export function AnimeDetailPage() {
   const newsQuery = useQuery({
     queryKey: ['news-search', anime?.franchiseTitle, anime?.title],
     queryFn: async () => {
-      const primary = await searchNews(anime!.franchiseTitle);
-      if (primary.articles.length) return primary.articles;
-      return (await searchNews(anime!.title)).articles;
+      const [italian, primary] = await Promise.all([
+        fetchItalyNews({ search: anime!.franchiseTitle, limit: 5 }),
+        searchNews(anime!.franchiseTitle),
+      ]);
+      const english = primary.articles.length
+        ? primary.articles
+        : (await searchNews(anime!.title)).articles;
+      const italianArticles = italian.articles.length
+        ? italian.articles
+        : (await fetchItalyNews({ search: anime!.title, limit: 5 })).articles;
+      return mergeRelatedNews(italianArticles, english);
     },
     enabled: !!anime,
     staleTime: 900000,
@@ -161,6 +224,17 @@ export function AnimeDetailPage() {
             <FavoriteButton anilistId={anime.canonicalSeasonId} relatedIds={seasonIds} inline />
           </div>
 
+          {anime.trailerUrl && (
+            <a
+              href={anime.trailerUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/80"
+            >
+              Guarda trailer
+            </a>
+          )}
+
           <StarRating score={anime.averageScore} size="md" />
 
           <div className="flex flex-wrap gap-1">
@@ -185,12 +259,15 @@ export function AnimeDetailPage() {
               <span className="col-span-2">
                 Uscita: {anime.airingDay}
                 {anime.airingTime ? ` ${anime.airingTime}` : ''}
+                {anime.nextEpisode ? ` · ep. ${anime.nextEpisode}` : ''}
               </span>
             )}
             {releaseDateLabel && (
               <span className="col-span-2">Uscita prevista: {releaseDateLabel}</span>
             )}
           </div>
+
+          <ItalianVerificationNote verified={anime.hasItalianLink} />
 
           {(anime.seasons.length > 1 || anime.seasonCount > 1) && (
             <div>
@@ -218,7 +295,9 @@ export function AnimeDetailPage() {
             </div>
           )}
 
-          {anime.italianPlatforms.length > 0 && (
+          <StreamingLinks links={anime.streamingLinks} />
+
+          {anime.italianPlatforms.length > 0 && !anime.streamingLinks.length && (
             <div>
               <p className="mb-1 text-xs text-gray-500">Piattaforme italiane</p>
               <div className="flex flex-wrap gap-1">
@@ -231,11 +310,8 @@ export function AnimeDetailPage() {
                   </span>
                 ))}
               </div>
+              <p className="mt-2 text-xs text-gray-500">Le piattaforme sono indicative, non filtrate per l’Italia.</p>
             </div>
-          )}
-
-          {anime.platforms.length > 0 && (
-            <p className="text-sm text-gray-500">Streaming: {anime.platforms.join(', ')}</p>
           )}
 
           {relatedNews.length > 0 && (
